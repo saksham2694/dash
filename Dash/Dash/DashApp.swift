@@ -9,9 +9,15 @@ import SwiftUI
 
 @main
 struct DashApp: App {
+    /// The single source of truth for location, owned for the app's lifetime.
+    /// Creating it wires the `LocationReceiver` callbacks; `.task` below starts it.
+    @StateObject private var locationStore = LocationStore()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(locationStore)
+                .task { locationStore.start() }
         }
     }
 }
