@@ -1,0 +1,16 @@
+// GoogleMapsService.xcconfig.template
+//
+// Copy this file to `GoogleMapsService.xcconfig` (same directory) and paste your
+// Google Maps SDK for iOS key. The real file is git-ignored so the key never
+// lands in source control.
+//
+//   cp Dash/Config/GoogleMapsService.xcconfig.template Dash/Config/GoogleMapsService.xcconfig
+//
+// The value flows: this xcconfig -> build setting GOOGLE_MAPS_API_KEY ->
+// Info.plist key "GoogleMapsAPIKey" ($(GOOGLE_MAPS_API_KEY)) -> read at runtime
+// via GoogleMapsConfiguration.apiKey.
+//
+// In CI, set GOOGLE_MAPS_API_KEY as an environment/build variable instead of
+// committing this file.
+
+GOOGLE_MAPS_API_KEY =

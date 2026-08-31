@@ -11,6 +11,7 @@
 		40FACE01304603B5007A11BB /* DashShared in Frameworks */ = {isa = PBXBuildFile; productRef = 40FACE02304603B5007A11BB /* DashShared */; };
 		40FACE03304603B5007A11BB /* DashShared in Frameworks */ = {isa = PBXBuildFile; productRef = 40FACE04304603B5007A11BB /* DashShared */; };
 		40FACE07304603B5007A11BB /* DashShared in Frameworks */ = {isa = PBXBuildFile; productRef = 40FACE08304603B5007A11BB /* DashShared */; };
+		40FACE12304603B5007A11BB /* GoogleMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 40FACE11304603B5007A11BB /* GoogleMaps */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -51,6 +52,8 @@
 		407EC5FB304602D2007A11BB /* DashRelay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DashRelay.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		407EC607304602D4007A11BB /* DashRelayTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DashRelayTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		407EC611304602D4007A11BB /* DashRelayUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DashRelayUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		40FACE13304603B5007A11BB /* GoogleMapsService.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = GoogleMapsService.xcconfig; sourceTree = "<group>"; };
+		40FACE15304603B5007A11BB /* GoogleMapsService.xcconfig.template */ = {isa = PBXFileReference; lastKnownFileType = text; path = GoogleMapsService.xcconfig.template; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -115,6 +118,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				407EC624304603B5007A11BB /* DashShared in Frameworks */,
+				40FACE12304603B5007A11BB /* GoogleMaps in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -162,6 +166,7 @@
 		407EC5C43045F8FA007A11BB = {
 			isa = PBXGroup;
 			children = (
+				40FACE14304603B5007A11BB /* Config */,
 				407EC5CF3045F8FB007A11BB /* Dash */,
 				407EC5DD3045F8FD007A11BB /* DashTests */,
 				407EC5E73045F8FD007A11BB /* DashUITests */,
@@ -193,6 +198,15 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		40FACE14304603B5007A11BB /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				40FACE13304603B5007A11BB /* GoogleMapsService.xcconfig */,
+				40FACE15304603B5007A11BB /* GoogleMapsService.xcconfig.template */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -214,6 +228,7 @@
 			name = Dash;
 			packageProductDependencies = (
 				407EC623304603B5007A11BB /* DashShared */,
+				40FACE11304603B5007A11BB /* GoogleMaps */,
 			);
 			productName = Dash;
 			productReference = 407EC5CD3045F8FB007A11BB /* Dash.app */;
@@ -381,6 +396,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				407EC622304603B5007A11BB /* XCLocalSwiftPackageReference "../DashShared" */,
+				40FACE10304603B5007A11BB /* XCRemoteSwiftPackageReference "ios-maps-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 407EC5CE3045F8FB007A11BB /* Products */;
@@ -634,6 +650,7 @@
 		};
 		407EC5EF3045F8FD007A11BB /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 40FACE13304603B5007A11BB /* GoogleMapsService.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -669,6 +686,7 @@
 		};
 		407EC5F03045F8FD007A11BB /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 40FACE13304603B5007A11BB /* GoogleMapsService.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -1015,6 +1033,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		40FACE10304603B5007A11BB /* XCRemoteSwiftPackageReference "ios-maps-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googlemaps/ios-maps-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		407EC623304603B5007A11BB /* DashShared */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1031,6 +1060,11 @@
 		40FACE08304603B5007A11BB /* DashShared */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DashShared;
+		};
+		40FACE11304603B5007A11BB /* GoogleMaps */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 40FACE10304603B5007A11BB /* XCRemoteSwiftPackageReference "ios-maps-sdk" */;
+			productName = GoogleMaps;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
