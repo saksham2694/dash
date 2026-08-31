@@ -32,6 +32,11 @@ final class LocationTracker: NSObject, ObservableObject {
 
     private let manager: CLLocationManager
 
+    /// Whether the owner (the relay session) currently wants location updates.
+    /// Only `start()` / `stop()` change this. Authorization callbacks check it so
+    /// a permission change can never revive GPS after a deliberate `stop()`.
+    private var wantsTracking = false
+
     init(manager: CLLocationManager = CLLocationManager()) {
         self.manager = manager
         self.authorizationStatus = manager.authorizationStatus
@@ -47,6 +52,7 @@ final class LocationTracker: NSObject, ObservableObject {
 
     /// Ask for permission if needed, otherwise start streaming immediately.
     func start() {
+        wantsTracking = true
         switch manager.authorizationStatus {
         case .notDetermined:
             // "Always" so relaying continues once backgrounded / screen-locked.
@@ -61,11 +67,14 @@ final class LocationTracker: NSObject, ObservableObject {
     }
 
     func stop() {
+        wantsTracking = false
         manager.stopUpdatingLocation()
         isTracking = false
     }
 
     private func beginUpdates() {
+        // Respect a deliberate stop even if a late authorization callback lands.
+        guard wantsTracking else { return }
         // Only legal with (at least) When-In-Use authorization and the "location"
         // background mode in Info.plist; guard on Always so we never trip the
         // runtime exception with a lesser grant.
@@ -101,9 +110,12 @@ extension LocationTracker: @preconcurrency CLLocationManagerDelegate {
 
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
-            beginUpdates()
+            beginUpdates() // no-ops unless the session wants tracking
         case .denied, .restricted:
-            stop()
+            // Stop delivering, but don't clear `wantsTracking` — if the user
+            // re-grants permission while the session is still active, resume.
+            manager.stopUpdatingLocation()
+            isTracking = false
         case .notDetermined:
             break
         @unknown default:

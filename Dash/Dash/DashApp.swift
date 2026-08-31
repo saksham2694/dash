@@ -9,20 +9,33 @@ import SwiftUI
 
 @main
 struct DashApp: App {
-    /// The single source of truth for location, owned for the app's lifetime.
-    /// Creating it wires the `LocationReceiver` callbacks; `.task` below starts it.
-    @StateObject private var locationStore = LocationStore()
+
+    /// Single source of truth for received location data.
+    @StateObject private var locationStore: LocationStore
+
+    /// Connection/session layer — owns the transport lifecycle and connection state.
+    @StateObject private var connection: ConnectionCoordinator
+
+    /// Pairing / known-device state. Independent of the current connection.
+    @StateObject private var knownDevices: KnownDeviceStore
 
     init() {
         // Hand the Google Maps SDK its API key before any map view is created.
         GoogleMapsConfiguration.bootstrap()
+
+        let store = LocationStore()
+        _locationStore = StateObject(wrappedValue: store)
+        _connection = StateObject(wrappedValue: ConnectionCoordinator(locationStore: store))
+        _knownDevices = StateObject(wrappedValue: KnownDeviceStore())
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .environmentObject(locationStore)
-                .task { locationStore.start() }
+                .environmentObject(connection)
+                .environmentObject(knownDevices)
+                .task { connection.startSession() }
         }
     }
 }

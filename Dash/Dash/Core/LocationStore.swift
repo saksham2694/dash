@@ -2,12 +2,14 @@
 //  LocationStore.swift
 //  Dash
 //
-//  The single source of truth for location on the iPad (spec §2). `LocationReceiver`
-//  owns the network; `LocationStore` owns app-level state: the latest packet, the
-//  link phase, and a watchdog that flags when packets stop arriving (spec §3.7).
+//  The single source of truth for *received location data* on the iPad (spec §2):
+//  the latest packet and a watchdog that flags when packets stop arriving
+//  (spec §3.7).
 //
-//  Every feature (map, speedometer, trip computer) will observe this object — none
-//  of them touch `LocationReceiver` or the network directly.
+//  It does NOT own the network transport or connection state — that moved up to
+//  `ConnectionCoordinator`, which feeds this store via `ingest(_:)` and calls
+//  `connectionEnded()` when a session stops. Every feature (map, speedometer,
+//  trip computer) observes this object; none of them touch the network.
 //
 
 import Combine
@@ -19,7 +21,7 @@ final class LocationStore: ObservableObject {
 
     /// Whether fresh location data is arriving.
     enum Signal: Equatable {
-        /// Nothing received yet, or the store is stopped.
+        /// Nothing received yet, or the session has ended.
         case waiting
         /// Packets are arriving within the watchdog interval.
         case live
@@ -37,9 +39,6 @@ final class LocationStore: ObservableObject {
     /// Watchdog state — drives the "signal lost" indicator.
     @Published private(set) var signal: Signal = .waiting
 
-    /// Where the underlying network link is (searching / connecting / connected).
-    @Published private(set) var linkPhase: LocationReceiver.Status.Phase = .stopped
-
     // MARK: - Derived conveniences
 
     var hasFix: Bool { latestPacket != nil }
@@ -47,48 +46,20 @@ final class LocationStore: ObservableObject {
     var speed: Double? { latestPacket?.speed }
     var heading: Double? { latestPacket?.heading }
 
-    // MARK: - Config / collaborators
+    // MARK: - Config
 
     /// How long without a packet before the signal is considered lost (spec: ~5–10s).
     let staleInterval: TimeInterval
 
-    private let receiver: LocationReceiver
     private var watchdogTask: Task<Void, Never>?
     private var lastPacketDate: Date?
 
-    convenience init(staleInterval: TimeInterval = 7) {
-        self.init(receiver: LocationReceiver(), staleInterval: staleInterval)
-    }
-
-    init(receiver: LocationReceiver, staleInterval: TimeInterval = 7) {
-        self.receiver = receiver
+    init(staleInterval: TimeInterval = 7) {
         self.staleInterval = staleInterval
-
-        receiver.onPacket = { [weak self] packet in
-            self?.ingest(packet)
-        }
-        receiver.onStatusChange = { [weak self] status in
-            self?.updateLinkPhase(status.phase)
-        }
     }
 
     deinit {
         watchdogTask?.cancel()
-    }
-
-    // MARK: - Lifecycle
-
-    /// Start receiving. Delegates networking to `LocationReceiver`.
-    func start() {
-        receiver.start()
-    }
-
-    /// Stop receiving and reset the watchdog. `latestPacket` is kept as last-known.
-    func stop() {
-        receiver.stop()
-        watchdogTask?.cancel()
-        watchdogTask = nil
-        signal = .waiting
     }
 
     // MARK: - Ingestion (main actor)
@@ -102,13 +73,14 @@ final class LocationStore: ObservableObject {
         armWatchdog()
     }
 
-    private func updateLinkPhase(_ phase: LocationReceiver.Status.Phase) {
-        linkPhase = phase
-        // A brief drop (red light, roaming) shouldn't panic the UI — the watchdog
-        // decides staleness. Only a full stop with nothing received resets to waiting.
-        if phase == .stopped, latestPacket == nil {
-            signal = .waiting
-        }
+    /// Called by `ConnectionCoordinator` when the relay session ends (deliberate
+    /// disconnect or teardown). Stops the watchdog and returns to `.waiting`; the
+    /// last known packet is kept for display.
+    func connectionEnded() {
+        watchdogTask?.cancel()
+        watchdogTask = nil
+        lastPacketDate = nil
+        signal = .waiting
     }
 
     // MARK: - Watchdog

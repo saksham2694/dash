@@ -32,6 +32,10 @@ final class LocationReceiver: @unchecked Sendable {
         var phase: Phase = .stopped
         /// How many DashRelay instances Bonjour currently sees.
         var discoveredServiceCount = 0
+        /// The Bonjour service name of the relay we are connected to, once
+        /// `phase == .connected`. `nil` otherwise. The connection/session layer
+        /// uses this to identify which device it reached (e.g. for pairing).
+        var connectedServiceName: String?
     }
 
     /// Called on the main actor for every decoded packet, in arrival order.
@@ -49,6 +53,7 @@ final class LocationReceiver: @unchecked Sendable {
     private var lineBuffer = PacketLineBuffer()
     private var reconnectWorkItem: DispatchWorkItem?
     private var status = Status()
+    private var pendingServiceName: String?
 
     init(reconnectDelay: TimeInterval = 2) {
         self.reconnectDelay = reconnectDelay
@@ -74,6 +79,7 @@ final class LocationReceiver: @unchecked Sendable {
             browser?.cancel()
             browser = nil
             lineBuffer.reset()
+            pendingServiceName = nil
             updateStatus { $0 = Status() }
         }
     }
@@ -133,6 +139,12 @@ final class LocationReceiver: @unchecked Sendable {
         browser = nil
         lineBuffer.reset()
 
+        if case let .service(name, _, _, _) = endpoint {
+            pendingServiceName = name
+        } else {
+            pendingServiceName = nil
+        }
+
         let connection = NWConnection(to: endpoint, using: .tcp)
         connection.stateUpdateHandler = { [weak self] state in
             self?.handleConnectionState(state)
@@ -145,7 +157,10 @@ final class LocationReceiver: @unchecked Sendable {
     private func handleConnectionState(_ state: NWConnection.State) {
         switch state {
         case .ready:
-            updateStatus { $0.phase = .connected }
+            updateStatus {
+                $0.phase = .connected
+                $0.connectedServiceName = self.pendingServiceName
+            }
             receiveNextChunk()
         case .failed, .cancelled:
             closeConnection()
@@ -191,7 +206,12 @@ final class LocationReceiver: @unchecked Sendable {
 
     private func scheduleReconnect() {
         guard isActive, reconnectWorkItem == nil else { return }
-        updateStatus { $0.phase = .browsing; $0.discoveredServiceCount = 0 }
+        pendingServiceName = nil
+        updateStatus {
+            $0.phase = .browsing
+            $0.discoveredServiceCount = 0
+            $0.connectedServiceName = nil
+        }
 
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }

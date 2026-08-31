@@ -6,7 +6,8 @@ without conversation history.
 
 - **Last updated:** 2026-09-01
 - **Branch:** `main`
-- **Latest commit:** `54fa7e8 feat(map): add live vehicle map`
+- **Latest commit:** `b3c98cb docs: add project status`
+- **Working tree:** the **connection/session layer** (§2 "Connection / session layer", §5 items 12–15) is implemented and tested but **not yet committed** as of this update.
 - **Authoritative requirements:** `PROJECT_SPEC.pdf` (repo root) — "iPad CarPlay-style Dashboard — Project Spec"
 - **Day-to-day guidance:** `CLAUDE.md` (repo root)
 
@@ -71,15 +72,20 @@ dash/
     │   ├── GoogleMapsService.xcconfig          # git-ignored, holds the real API key
     │   └── GoogleMapsService.xcconfig.template # committed template
     ├── Dash/                        # iPad app target
-    │   ├── DashApp.swift            # @main; owns LocationStore (@StateObject); bootstraps Google Maps
-    │   ├── ContentView.swift        # currently just a full-screen DashMapView (placeholder shell)
+    │   ├── DashApp.swift            # @main; owns LocationStore + ConnectionCoordinator + KnownDeviceStore; bootstraps Google Maps
+    │   ├── RootView.swift           # connection gate: dashboard only when isConnected, else throwaway placeholder
+    │   ├── ContentView.swift        # full-screen DashMapView (the "dashboard" behind the gate for now — placeholder shell)
     │   ├── Info.plist               # NSBonjourServices, GoogleMapsAPIKey = $(GOOGLE_MAPS_API_KEY)
     │   ├── Configuration/
     │   │   └── GoogleMapsConfiguration.swift   # reads key from Info.plist, calls GMSServices.provideAPIKey
     │   ├── Core/
-    │   │   ├── LocationReceiver.swift          # NWBrowser + NWConnection, reconnect loop
+    │   │   ├── LocationReceiver.swift          # NWBrowser + NWConnection, reconnect loop; Status now carries connectedServiceName
+    │   │   ├── LocationReceiving.swift         # protocol seam over LocationReceiver (DI for ConnectionCoordinator tests)
     │   │   ├── PacketLineBuffer.swift          # reassembles \n-delimited JSON → [LocationPacket]
-    │   │   └── LocationStore.swift             # single source of truth + watchdog
+    │   │   ├── LocationStore.swift             # single source of truth for location DATA + watchdog (no longer owns the transport)
+    │   │   ├── ConnectionState.swift           # enum: disconnected / discovering / connecting / connected
+    │   │   ├── ConnectionCoordinator.swift     # session layer: owns the transport, maps phase→ConnectionState, feeds LocationStore
+    │   │   └── KnownDeviceStore.swift          # pairing / known-device persistence (KnownRelay); separate from connection
     │   └── Features/Map/
     │       ├── MapProvider.swift               # protocol boundary + MapProviderID enum
     │       ├── MapCameraState.swift            # SDK-neutral camera value type + following(_:)
@@ -92,19 +98,23 @@ dash/
     │   ├── LocationReceiverTests.swift
     │   ├── PacketLineBufferTests.swift
     │   ├── LocationStoreTests.swift
+    │   ├── ConnectionCoordinatorTests.swift
+    │   ├── KnownDeviceStoreTests.swift
     │   ├── MapCameraStateTests.swift
     │   └── DashTests.swift          # scaffold `example()` — no-op, still present
     ├── DashUITests/                 # Xcode scaffold only, no real tests
     └── DashRelay/                   # iPhone app target
-        ├── DashRelayApp.swift       # @main; private Relay wires LocationTracker → LocationBroadcaster
+        ├── DashRelayApp.swift       # @main; owns RelaySessionController (@StateObject), starts it in .task
         ├── ContentView.swift        # still the "Hello, world!" scaffold
         ├── Info.plist               # UIBackgroundModes:[location], NSLocalNetworkUsageDescription, NSBonjourServices
         ├── Services/
-        │   ├── LocationTracker.swift       # wraps CLLocationManager, converts fixes → LocationPacket
-        │   └── LocationBroadcaster.swift   # NWListener advertised via Bonjour, \n-delimited JSON to N clients
+        │   ├── LocationTracker.swift       # wraps CLLocationManager; wantsTracking gate so auth callbacks can't revive GPS after stop()
+        │   ├── LocationBroadcaster.swift   # NWListener advertised via Bonjour, \n-delimited JSON to N clients
+        │   └── RelaySession.swift          # session layer: RelaySessionController (stopped/waiting/connected) + RelayTracking/RelayBroadcasting seams
         └── DashRelayTests/
             ├── LocationTrackerTests.swift
-            └── LocationBroadcasterTests.swift
+            ├── LocationBroadcasterTests.swift
+            └── RelaySessionControllerTests.swift
 ```
 
 `DashShared` is referenced by the Xcode project as a local Swift package and
@@ -113,21 +123,33 @@ linked into `Dash`, `DashTests`, `DashRelay`, and `DashRelayTests`.
 ### Runtime data flow (as built)
 
 ```
-iPhone — DashRelay                          iPad — Dash
-────────────────────                        ──────────────────
-CLLocationManager
-  → LocationTracker.packet(from:)           LocationReceiver (NWBrowser "_dashrelay._tcp"
-  → onPacket closure (in didUpdateLocations)   → NWConnection → receive loop)
-  → LocationBroadcaster.broadcast(_:)          → PacketLineBuffer.append(_:)  (split on \n, decode)
-  → NWListener → all TCP clients ───JSON+\n──▶ → LocationStore.ingest(_:)   ← SINGLE SOURCE OF TRUTH
-                                                 ├─ @Published latestPacket / signal / linkPhase
-                                                 └─ watchdog Task: no packet in staleInterval ⇒ signal = .stale
-                                                        │
-                                              ContentView (observes LocationStore)
-                                                → DashMapView(viewModel:, location: latestPacket)
-                                                → MapViewModel.update(with:)  → camera = camera.following(packet)
-                                                → GoogleMapProvider → GMSMapView.animate(to:) + move marker
+iPhone — DashRelay                              iPad — Dash
+────────────────────                            ──────────────────
+RelaySessionController (stopped/waiting/         ConnectionCoordinator (disconnected/discovering/
+  connected); start() → advertise + track,         connecting/connected); startSession()/disconnect()
+  stop() → stop networking AND GPS                    │ owns the transport lifecycle
+     │                                                ▼
+CLLocationManager                                LocationReceiver (NWBrowser "_dashrelay._tcp"
+  → LocationTracker.packet(from:)                  → NWConnection → receive loop)
+  → onPacket (in didUpdateLocations)              → PacketLineBuffer.append(_:)  (split on \n, decode)
+  → LocationBroadcaster.broadcast(_:)             → onPacket → ConnectionCoordinator
+  → NWListener → all TCP clients ───JSON+\n──────▶ → LocationStore.ingest(_:)   ← SINGLE SOURCE OF TRUTH (location DATA)
+                                                     ├─ @Published latestPacket / signal
+                                                     └─ watchdog Task: no packet in staleInterval ⇒ signal = .stale
+                                                            │
+                                                  RootView: shows ContentView only when
+                                                  ConnectionCoordinator.isConnected, else a placeholder
+                                                     → ContentView (observes LocationStore)
+                                                     → DashMapView(viewModel:, location: latestPacket)
+                                                     → MapViewModel.update(with:) → camera.following(packet)
+                                                     → GoogleMapProvider → GMSMapView.animate(to:) + move marker
 ```
+
+Connection state (`disconnected/discovering/connecting/connected`) lives **only**
+in `ConnectionCoordinator`. `LocationStore` no longer tracks a link phase — it
+owns location *data* and the data-freshness watchdog, which is a separate concern
+(you can be `.connected` but `signal == .stale` if the relay is up but has no GPS
+fix).
 
 ### Key architectural rules currently honoured
 
@@ -143,10 +165,52 @@ CLLocationManager
   reference, no networking, no GPS — it converts a `LocationPacket` into a
   `MapCameraState` via the pure `MapCameraState.following(_:)`.
 - **Bonjour discovery, never a hardcoded IP** — on both sides.
-- **Disconnects are routine.** `LocationReceiver` re-browses and reconnects on a
-  timer; `LocationStore`'s watchdog covers the UI gap.
+- **Incidental disconnects are routine.** `LocationReceiver` re-browses and
+  reconnects on a timer; `LocationStore`'s watchdog covers the UI gap. A
+  **deliberate** disconnect is different — it stays disconnected (see below).
 - **SwiftUI + MVVM**, `@MainActor` isolation, serial-queue-confined
   `@unchecked Sendable` classes for the Network-framework wrappers.
+
+### Connection / session layer
+
+A thin layer that sits **above** the networking and location layers — it does
+not replace their responsibilities.
+
+**Three separate concerns, three types:**
+
+| Concern | Type | Owns |
+|---|---|---|
+| Current connection state + session lifecycle (iPad) | `ConnectionCoordinator` (`@MainActor ObservableObject`) | the `LocationReceiving` transport; `@Published connectionState` / `connectedDeviceName`; `startSession()` / `disconnect()` |
+| Current session state (iPhone) | `RelaySessionController` (`@MainActor ObservableObject`) | `LocationTracker` + `LocationBroadcaster`; `@Published state` (`stopped`/`waiting`/`connected`) / `isTrackingLocation`; `start()` / `stop()` |
+| Pairing / known devices (iPad) | `KnownDeviceStore` (`@MainActor ObservableObject`) | a persisted `[KnownRelay]` with `remember` / `forget` / `forgetAll` |
+
+- **`ConnectionCoordinator` owns the transport lifecycle**, not `LocationStore`.
+  It translates `LocationReceiver.Status.Phase` → `ConnectionState`
+  (`stopped→disconnected`, `browsing→discovering`, `connecting→connecting`,
+  `connected→connected`), forwards decoded packets into `LocationStore.ingest(_:)`
+  (still the only place packets land), and calls `LocationStore.connectionEnded()`
+  on a deliberate disconnect.
+- **`LocationReceiver` / `LocationBroadcaster` keep their jobs.** Discovery +
+  receiving stays in `LocationReceiver`; advertising + sending stays in
+  `LocationBroadcaster`. The session layer only decides *when* they run.
+- **Deliberate disconnect ≠ auto-reconnect.** `ConnectionCoordinator.disconnect()`
+  sets a `deliberatelyDisconnected` flag, calls `receiver.stop()` (which clears
+  the receiver's own `isActive` so its reconnect loop is inert), and ignores any
+  trailing transport status. `RelaySessionController.stop()` stops both the
+  broadcaster and the tracker and lands in `.stopped`, from which nothing
+  restarts on its own.
+- **The relay session controls GPS.** `RelaySessionController.start()` starts
+  `LocationTracker`; `.stop()` stops it. `LocationTracker` also gained a
+  `wantsTracking` gate so a late Core Location authorization callback can't
+  re-`startUpdatingLocation()` after a deliberate stop.
+- **The dashboard is gated.** `RootView` shows `ContentView` only when
+  `ConnectionCoordinator.isConnected`; otherwise a deliberately minimal
+  placeholder (`ProgressView` + one line). Feature views never read connection
+  state.
+- **Pairing state is independent.** `KnownDeviceStore` and `ConnectionCoordinator`
+  hold no reference to each other. `KnownRelay` is keyed by Bonjour service name
+  (spec §4) and the store already supports multiple devices. The hook that links
+  them later is `ConnectionCoordinator.connectedDeviceName`.
 
 ---
 
@@ -170,13 +234,23 @@ CLLocationManager
   `pausesLocationUpdatesAutomatically = false`), requests **Always**
   authorization, sets `allowsBackgroundLocationUpdates` when granted, converts
   each `CLLocation` to a `LocationPacket`, and calls `onPacket` synchronously
-  inside `didUpdateLocations`.
+  inside `didUpdateLocations`. A `wantsTracking` gate (set only by
+  `start()`/`stop()`) means a late authorization callback cannot revive GPS
+  after a deliberate stop; a `denied`/`restricted` change stops delivery without
+  clearing intent, so re-granting permission resumes.
 - **[Implemented]** `LocationBroadcaster` — `NWListener` advertised as a Bonjour
   `_dashrelay._tcp` service; accepts multiple concurrent TCP clients; sends each
   packet as one `\n`-terminated JSON line; clean connect/disconnect handling; a
   main-actor `onStatusChange` hook (`isListening`, `clientCount`).
-- **[Implemented]** `DashRelayApp` wires `tracker.onPacket → broadcaster.broadcast`
-  and starts both at launch.
+- **[Implemented]** `RelaySessionController` — the iPhone session layer. Owns
+  `LocationTracker` + `LocationBroadcaster` behind `RelayTracking` /
+  `RelayBroadcasting` seams; wires each fix straight through;
+  `@Published state` (`stopped` / `waiting` / `connected`, derived from
+  `clientCount`) and `isTrackingLocation`; `start()` begins advertising + GPS,
+  `stop()` (deliberate disconnect) stops both; nothing auto-restarts from
+  `.stopped`.
+- **[Implemented]** `DashRelayApp` owns `RelaySessionController` as `@StateObject`
+  and calls `start()` in `.task` at launch.
 - **[Implemented]** `Info.plist` — `UIBackgroundModes: [location]`,
   `NSLocationAlwaysAndWhenInUseUsageDescription`,
   `NSLocationWhenInUseUsageDescription`, `NSLocalNetworkUsageDescription`,
@@ -187,6 +261,12 @@ CLLocationManager
 - **[Verified · automated]** `LocationBroadcasterTests` (5): service type,
   single-`\n` framing, line decodes back, multi-line stream splits, lifecycle
   no-ops.
+- **[Verified · automated]** `RelaySessionControllerTests` (8): `stopped→waiting`
+  on `start()` (advertising + GPS begin), `waiting→connected` when a client
+  attaches and back, `connected→stopped` on `stop()` (broadcaster + tracker
+  stopped), **stopping the session stops tracking**, **a deliberate disconnect
+  does not immediately reconnect** (trailing status ignored), resume after stop,
+  fixes forwarded to the broadcaster.
 - **[Implemented]** DashRelay app builds and launches (SwiftUI scaffold UI only).
 
 ### Dash (iPad)
@@ -194,20 +274,38 @@ CLLocationManager
 - **[Implemented]** `LocationReceiver` — `NWBrowser` for `_dashrelay._tcp`,
   connects to the first discovered endpoint, receive loop feeding
   `PacketLineBuffer`; automatic re-browse/reconnect after a delay on any
-  drop/failure; `Status` phases `stopped / browsing / connecting / connected` via
-  a main-actor `onStatusChange`.
+  *incidental* drop/failure (suppressed after a deliberate `stop()`); `Status`
+  phases `stopped / browsing / connecting / connected` plus
+  `connectedServiceName` (the Bonjour name of the relay reached, for pairing)
+  via a main-actor `onStatusChange`. Conforms to `LocationReceiving`.
 - **[Implemented]** `PacketLineBuffer` — reassembles the TCP byte stream, splits
   on `\n`, decodes each line, keeps partial trailing lines, skips blank/malformed
   lines, drops the buffer if an unterminated line exceeds 64 KB.
 - **[Implemented]** `LocationStore` — `@MainActor ObservableObject`, the single
-  source of truth: `@Published latestPacket / signal / linkPhase`; derived
-  `hasFix / isSignalLost / speed / heading`; `ingest(_:)` records a packet and
-  arms the watchdog; watchdog `Task` sleeps `staleInterval` (default 7 s, in the
-  spec's 5–10 s band) then flags `.stale` while keeping the last packet;
-  `refreshSignal(now:)` for deterministic tests; mirrors the receiver's link
-  phase; `start()/stop()` delegate networking to `LocationReceiver`.
-- **[Implemented]** `DashApp` owns `LocationStore` as `@StateObject`, injects it
-  as an `environmentObject`, starts it in `.task`, and calls
+  source of truth **for received location data**: `@Published latestPacket /
+  signal`; derived `hasFix / isSignalLost / speed / heading`; `ingest(_:)`
+  records a packet and arms the watchdog; watchdog `Task` sleeps `staleInterval`
+  (default 7 s, in the spec's 5–10 s band) then flags `.stale` while keeping the
+  last packet; `refreshSignal(now:)` for deterministic tests; `connectionEnded()`
+  returns to `.waiting` when the session stops. **No longer owns the transport or
+  a link phase** — that moved to `ConnectionCoordinator`.
+- **[Implemented]** `ConnectionCoordinator` — the iPad session layer. Owns a
+  `LocationReceiving`; `@Published connectionState` (`disconnected` /
+  `discovering` / `connecting` / `connected`) and `connectedDeviceName`;
+  `isConnected`; `startSession()` / `disconnect()`; feeds packets into
+  `LocationStore`; a deliberate `disconnect()` stays disconnected and ignores
+  trailing transport status. Pure `connectionState(for:)` phase mapping.
+- **[Implemented]** `KnownDeviceStore` — `@MainActor ObservableObject` +
+  `KnownDeviceStoring`; a `[KnownRelay]` (keyed by Bonjour service name)
+  persisted as JSON in `UserDefaults`; `remember` / `forget` / `forgetAll` /
+  `isKnown`; supports multiple devices. **This is storage only** — nothing
+  decides *when* to remember a device yet.
+- **[Implemented]** `RootView` — gates the UI: `ContentView` when
+  `ConnectionCoordinator.isConnected`, otherwise a minimal placeholder. Throwaway
+  — the real setup/connection screens are a later milestone.
+- **[Implemented]** `DashApp` owns `LocationStore`, `ConnectionCoordinator`, and
+  `KnownDeviceStore` as `@StateObject`s, injects them as `environmentObject`s,
+  calls `connection.startSession()` in `.task`, and
   `GoogleMapsConfiguration.bootstrap()` in `init()`.
 - **[Implemented]** Map abstraction: `MapProvider` protocol (`id`,
   `makeMapView(camera:) -> AnyView`), `MapProviderID` enum
@@ -229,11 +327,22 @@ CLLocationManager
   per chunk, line split across chunks, partial trailing line held, blank lines
   ignored, malformed line skipped, oversized line dropped then recovers, `reset()`,
   round-trip against `LocationWireFormat`.
-- **[Verified · automated]** `LocationStoreTests` (12): initial state, ingest
+- **[Verified · automated]** `LocationStoreTests` (10): initial state, ingest
   becomes source of truth, latest-wins, live within interval, goes stale, stale
-  retains packet, recovers after stale, watchdog `Task` fires on its own, wired to
-  receiver callback, mirrors link phase, brief link drop keeps last-known, `stop()`
-  resets.
+  retains packet, recovers after stale, watchdog `Task` fires on its own,
+  `connectionEnded()` returns to `.waiting` keeping the last packet,
+  `connectionEnded()` stays `.waiting` past the interval.
+- **[Verified · automated]** `ConnectionCoordinatorTests` (12): starts
+  disconnected; `disconnected→discovering` on `startSession()`;
+  `discovering→connecting`; `connecting→connected` (exposes device name);
+  `connected→disconnected` path; deliberate disconnect stops the transport;
+  **deliberate disconnect does not immediately reconnect**; `startSession()`
+  re-arms after a disconnect; packets flow to `LocationStore` (not the
+  coordinator); deliberate disconnect resets the store signal; pure phase
+  mapping; **known-device state is independent of connection state**.
+- **[Verified · automated]** `KnownDeviceStoreTests` (7): starts empty, remember
+  adds, remember is idempotent by id, forget removes, multiple devices,
+  `forgetAll`, persists across store instances.
 - **[Verified · automated]** `MapCameraStateTests` + `MapViewModelTests` (7):
   default heading is `nil`, `following` re-centres and keeps zoom, negative
   heading → `nil`, zero heading kept, default provider is `.googleMaps`,
@@ -251,14 +360,20 @@ CLLocationManager
   `LocationStore`. This was a manual on-device check; there is no automated
   end-to-end / two-device test in the repo, so it cannot be re-verified from a
   clean checkout alone.
+- **[Verified · simulator + real relay]** During the connection/session-layer
+  work, the Dash app running in the simulator discovered a real DashRelay
+  advertising `_dashrelay._tcp` on the LAN, completed
+  `discovering → connecting → connected`, and `RootView` switched from the
+  placeholder to the dashboard — exercising the new gate end to end. (Deliberate
+  disconnect and re-connect are covered by unit tests, not this manual check.)
 
 ### Automated test totals (all passing, 2026-09-01)
 
 | Suite | Tests | Runner |
 |---|---:|---|
 | `DashSharedTests` | 4 | `swift test` |
-| `DashRelayTests` | 12 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
-| `DashTests` | 32 (incl. 1 no-op scaffold) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+| `DashRelayTests` | 20 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
+| `DashTests` | 49 (incl. 1 no-op scaffold) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
 
 ---
 
@@ -275,7 +390,9 @@ CLLocationManager
   Simulator** (used "iPhone 17 Pro" during development). `DashUITests` /
   `DashRelayUITests` are Xcode scaffolds only — no real UI tests.
 - **Simulator smoke test:** the Dash app has been installed and launched on the
-  simulator to confirm the Google Maps SDK initialises and renders.
+  simulator to confirm the Google Maps SDK initialises and renders, and (with a
+  real DashRelay on the LAN) to confirm the connection gate reaches `.connected`
+  and shows the dashboard.
 - **Xcode project:** single `Dash.xcodeproj`, project object version 77
   (file-system-synchronized groups). `DashShared` is a local SPM package
   referenced by the project.
@@ -348,18 +465,69 @@ CLLocationManager
     integration could be exercised end to end. This is a throwaway shell, not the
     dashboard layout.
 
+12. **Connection/session as a layer above networking + location.** New
+    `ConnectionCoordinator` (iPad) and `RelaySessionController` (iPhone) own the
+    *lifecycle* of the existing `LocationReceiver` / `LocationBroadcaster` /
+    `LocationTracker`. Those types kept their responsibilities (discovery/receive,
+    advertise/send, GPS acquisition); the session layer only decides when they
+    run and exposes a stable state. `LocationStore` was narrowed to "received
+    location data + watchdog" and lost its `linkPhase` (connection state was
+    being tracked in two places).
+
+13. **Deliberate disconnect is a first-class, sticky state.** Distinct from an
+    incidental drop: it stops the transport *and* GPS and does not auto-reconnect.
+    `LocationReceiver`'s existing reconnect loop is left intact for incidental
+    drops but is inert after a deliberate `stop()`. `LocationTracker` gained a
+    `wantsTracking` gate so an authorization callback can't restart GPS behind
+    the session's back.
+
+14. **The relay session gates GPS from `start()` to `stop()`** (not "only while a
+    dashboard is connected"). Rationale: background-location reliability (no
+    `CLLocationManager` start/stop churn on brief link blips), the spec's emphasis
+    on continuous relaying, and the phone being on a charger. The
+    `waiting`/`connected` distinction is still exposed (from `clientCount`) for a
+    future status UI. Alternative — track only while connected — remains easy to
+    switch to in `RelaySessionController`.
+
+15. **Pairing = known-device storage now, pairing *flow* later.** `KnownDeviceStore`
+    persists a list of `KnownRelay` (by Bonjour service name) and is fully tested,
+    but nothing yet decides when to add a device, offers a "Forget" action, or
+    restricts connections to known devices. `KnownDeviceStore` and
+    `ConnectionCoordinator` are deliberately decoupled;
+    `ConnectionCoordinator.connectedDeviceName` is the bridge for later.
+
+16. **`ConnectionState` is its own enum**, not a re-export of
+    `LocationReceiver.Status.Phase`. The transport phase is a networking detail;
+    the rest of the app depends on the stable `disconnected / discovering /
+    connecting / connected` vocabulary the spec's requirements used.
+
 ---
 
 ## 6. Current limitations / known issues
 
-- **No dashboard UI.** `ContentView` is a bare full-screen map. There is no
-  tile layout, no theming, no "GPS signal lost" banner surfaced to the user
-  (the `LocationStore.signal` state exists but nothing displays it).
+- **No dashboard UI.** Behind the connection gate, `ContentView` is a bare
+  full-screen map. There is no tile layout, no theming, no "GPS signal lost"
+  banner surfaced to the user (the `LocationStore.signal` state exists but
+  nothing displays it).
 - **DashRelay has no real UI.** `ContentView.swift` is still the "Hello, world!"
   scaffold — no "Relay active" / last-sent-timestamp status screen (spec §3).
-- **No connection/session lifecycle UI.** No pairing, no "forget device", no
-  visible connection state, no reconnect indicator. `LocationReceiver` always
-  auto-connects to the first relay it sees.
+  `RelaySessionController` is injected as an `environmentObject` but nothing
+  reads it yet, and there is no in-app "disconnect" control (only unit tests
+  call `stop()`).
+- **Connection state exists; connection UI does not.** `ConnectionCoordinator`
+  exposes `connectionState` and `RootView` gates on it, but the not-connected
+  view is a throwaway `ProgressView`. No user-facing reconnect indicator, no
+  "disconnect" button, no device chooser.
+- **Pairing is storage-only.** `KnownDeviceStore` persists known devices and is
+  tested, but there is no pairing flow, no "Forget" affordance, and
+  `LocationReceiver` still connects to the **first** relay it discovers
+  regardless of what's remembered. A multi-relay picker is still needed.
+- **`MapViewModel.swift` has 2 build warnings** (pre-existing, unrelated to this
+  layer): `main actor-isolated static property 'default' can not be referenced
+  from a nonisolated context` at lines 24 and 28 — the `camera: MapCameraState
+  = .default` default argument. The build still succeeds. Fix belongs with a
+  Map-focused change (e.g. a convenience initializer, as `MapViewModel`'s
+  `provider:` default already uses).
 - **Landscape-primary not configured.** All four iPad orientations are currently
   allowed; the "landscape is primary" intent isn't reflected in Info.plist.
 - **End-to-end transfer is not covered by automated tests.** It has been
@@ -386,13 +554,20 @@ CLLocationManager
 
 From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
 
-- **[Planned]** DashRelay `StatusView` (relay-active + last-sent timestamp).
-- **[Planned]** Connection/session lifecycle: visible link state, watchdog
-  "GPS signal lost" indicator in the UI, reconnect feedback.
-- **[Planned]** Device pairing / "forget device" (the deferred multi-instance
-  Bonjour picker + remembered choice by service name).
+- **[Implemented, not surfaced]** Connection/session *state machine* — done
+  (`ConnectionCoordinator`, `RelaySessionController`). What remains is **UI**:
+  a visible connection state, a watchdog "GPS signal lost" indicator, reconnect
+  feedback, and a "disconnect" control that calls `disconnect()` / `stop()`.
+- **[Planned]** DashRelay `StatusView` (relay-active + last-sent timestamp) —
+  can now bind to `RelaySessionController.state` / `isTrackingLocation`.
+- **[Planned]** Device **pairing flow** — the storage exists (`KnownDeviceStore`);
+  still needed: deciding when to remember a device (pair-on-connect or an explicit
+  step), a multi-relay picker in/above `LocationReceiver` (it still auto-takes the
+  first result), a "Forget" affordance, and optionally restricting connections to
+  known devices.
 - **[Planned]** `Home/DashboardView` — the CarPlay-style tile layout that
-  assembles map + music + speedometer (the single layout owner).
+  assembles map + music + speedometer (the single layout owner); replaces the
+  `RootView → ContentView` full-screen-map shell.
 - **[Planned]** `ThemeManager` — dark/light auto-switch by local sunrise/sunset.
 - **[Planned]** Hide iPadOS chrome: full-screen, `isIdleTimerDisabled = true`,
   no nav bars / default list styling.
@@ -421,13 +596,19 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
 
 Roughly in order (adapts the spec §11 build order to where we are):
 
-1. **Connection / session lifecycle.** Surface `LocationStore.signal` and
-   `linkPhase` in the UI; "GPS signal lost" indicator; show reconnect state.
-2. **Pairing / forgetting.** Multi-instance Bonjour picker in `LocationReceiver`,
-   remember the chosen relay by Bonjour service name, "forget device" action.
-3. **DashRelay `StatusView`** — minimal relay-active / last-sent-timestamp screen.
+1. **Connection / session UI.** Surface `ConnectionCoordinator.connectionState`
+   and `LocationStore.signal` (the "GPS signal lost" indicator); a
+   connecting/reconnecting view; a "disconnect" control wired to
+   `ConnectionCoordinator.disconnect()`. Replace the throwaway `RootView`
+   placeholder.
+2. **Pairing flow.** Multi-relay picker (above/inside `LocationReceiver`), decide
+   when to `KnownDeviceStore.remember(...)` (using
+   `ConnectionCoordinator.connectedDeviceName`), a "Forget" action, optionally
+   filter connections to known devices.
+3. **DashRelay `StatusView`** — bind to `RelaySessionController` (state,
+   `isTrackingLocation`), show last-sent timestamp; add a stop/start control.
 4. **`DashboardView` skeleton** — placeholder tiles to validate the CarPlay-style
-   layout; move the map into a tile (retire the `ContentView` full-screen shell).
+   layout; move the map into a tile (retire the `RootView → ContentView` shell).
 5. **Speedometer + trip computer** — derived from `LocationStore` (smoothing,
    km/h, `TripStats`).
 6. **Music** — MusicKit catalog search + custom player.
@@ -488,6 +669,8 @@ Git history on `main` (newest first):
 
 | Commit | Milestone |
 |---|---|
+| *(working tree, uncommitted)* | **connection/session layer** — iPad `ConnectionCoordinator` (`disconnected`/`discovering`/`connecting`/`connected`, `startSession()`/`disconnect()`, feeds `LocationStore`) + `RootView` gate; iPhone `RelaySessionController` (`stopped`/`waiting`/`connected`, `start()`/`stop()` controls GPS); `KnownDeviceStore` for pairing state (storage only). `LocationStore` narrowed to location data + watchdog (lost `linkPhase`). `LocationReceiver.Status` gains `connectedServiceName`; `LocationTracker` gains a `wantsTracking` gate. New: `ConnectionCoordinatorTests` (12), `KnownDeviceStoreTests` (7), `RelaySessionControllerTests` (8). Deliberate disconnect verified (unit) not to auto-reconnect and to stop GPS; gate verified in the simulator against a real relay. |
+| `b3c98cb` | **docs: add project status** — this document. |
 | `54fa7e8` | **feat(map): add live vehicle map** — bootstrap Google Maps in `DashApp`; `ContentView` shows a full-screen `DashMapView` fed from `LocationStore.latestPacket`; `GoogleMapProvider` gains a vehicle `GMSMarker` that follows the camera. Verified in the simulator (SDK 11.1.0 initialises, map + marker render). |
 | `61eb89a` | **feat(map): add map provider abstraction** — added the Google Maps SPM dependency (pinned 11.1.0, Dash target only) and the secure API-key config (xcconfig → Info.plist → `GoogleMapsConfiguration`); created `MapProvider` / `MapProviderID` / `MapCameraState` / `MapViewModel` / `DashMapView` / `GoogleMapProvider`; `MapCameraStateTests`. |
 | `4362d0a` | **feat(dash): wire location store into app** — `DashApp` owns `LocationStore` as `@StateObject`, injects it as `environmentObject`, starts it in `.task`. |
@@ -503,6 +686,11 @@ Git history on `main` (newest first):
 ### Verified milestones (beyond automated tests)
 
 - **iPhone → iPad location transfer over Bonjour/TCP** — confirmed on physical
-  devices by the developer.
+  devices by the developer (manual, pre-dates this repo's automated suite).
 - **Google Maps renders in Dash** — confirmed in the iOS Simulator (map tiles +
   vehicle marker, SDK authenticated with the configured key).
+- **Connection gate reaches `.connected` against a real relay** — confirmed in
+  the iOS Simulator: Dash discovered a live DashRelay on the LAN, ran
+  `discovering → connecting → connected`, and `RootView` swapped the placeholder
+  for the dashboard. The deliberate-disconnect and no-auto-reconnect behaviour is
+  covered by unit tests only, not this manual check.

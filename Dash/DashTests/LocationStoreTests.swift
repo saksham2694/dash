@@ -3,7 +3,7 @@
 //  DashTests
 //
 //  Store + watchdog behaviour, driven by synthetic packets and injected times —
-//  no real networking.
+//  no real networking. Connection-state wiring lives in ConnectionCoordinatorTests.
 //
 
 import Foundation
@@ -35,7 +35,6 @@ struct LocationStoreTests {
         let store = LocationStore()
         #expect(store.latestPacket == nil)
         #expect(store.signal == .waiting)
-        #expect(store.linkPhase == .stopped)
         #expect(store.hasFix == false)
         #expect(store.isSignalLost == false)
     }
@@ -127,55 +126,29 @@ struct LocationStoreTests {
         #expect(store.signal == .stale)
     }
 
-    // MARK: - Link phase / connection state
+    // MARK: - Session end
 
-    @Test("connects to the receiver's packet callback")
-    func wiredToReceiver() {
-        let receiver = LocationReceiver()
-        let store = LocationStore(receiver: receiver)
-        let p = packet(latitude: 7)
-
-        receiver.onPacket?(p) // simulate a decoded packet from the network layer
-
-        #expect(store.latestPacket == p)
-        #expect(store.signal == .live)
-    }
-
-    @Test("mirrors the receiver's link phase")
-    func mirrorsLinkPhase() {
-        let receiver = LocationReceiver()
-        let store = LocationStore(receiver: receiver)
-
-        receiver.onStatusChange?(.init(phase: .connecting, discoveredServiceCount: 1))
-        #expect(store.linkPhase == .connecting)
-
-        receiver.onStatusChange?(.init(phase: .connected, discoveredServiceCount: 1))
-        #expect(store.linkPhase == .connected)
-    }
-
-    @Test("a brief link drop does not immediately blank the signal")
-    func linkDropKeepsLastKnown() {
-        let receiver = LocationReceiver()
-        let store = LocationStore(receiver: receiver)
-        let t0 = Date(timeIntervalSince1970: 1_000_000)
-
-        store.ingest(packet(), at: t0)
-        receiver.onStatusChange?(.init(phase: .browsing, discoveredServiceCount: 0))
-
-        #expect(store.linkPhase == .browsing)
-        #expect(store.signal == .live)
-        #expect(store.latestPacket != nil)
-    }
-
-    @Test("stop resets the signal to waiting but keeps last-known packet")
-    func stopResets() {
+    @Test("connectionEnded returns to waiting but keeps last-known packet")
+    func connectionEndedResets() {
         let store = LocationStore()
         let p = packet()
         store.ingest(p)
 
-        store.stop()
+        store.connectionEnded()
 
         #expect(store.signal == .waiting)
         #expect(store.latestPacket == p)
+    }
+
+    @Test("connectionEnded keeps the signal at waiting even past the interval")
+    func connectionEndedStaysWaiting() {
+        let store = LocationStore(staleInterval: 5)
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        store.ingest(packet(), at: t0)
+
+        store.connectionEnded()
+        store.refreshSignal(now: t0.addingTimeInterval(60))
+
+        #expect(store.signal == .waiting) // not .stale — we're not trying anymore
     }
 }
