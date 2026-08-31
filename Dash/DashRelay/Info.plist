@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>DashRelay connects to the Dash dashboard on your iPad over the local network to send it your location.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_dashrelay._tcp</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

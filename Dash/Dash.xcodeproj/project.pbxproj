@@ -53,7 +53,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		40FACE05304603B5007A11BB /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		40FACE05304603B5007A11BB /* Exceptions for "DashRelay" folder in "DashRelay" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -81,7 +81,7 @@
 		407EC5FC304602D2007A11BB /* DashRelay */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				40FACE05304603B5007A11BB /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+				40FACE05304603B5007A11BB /* Exceptions for "DashRelay" folder in "DashRelay" target */,
 			);
 			path = DashRelay;
 			sourceTree = "<group>";
@@ -779,11 +779,11 @@
 				DEVELOPMENT_TEAM = LGQX79QMNJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DashRelay/Info.plist;
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "DashRelay sends your location to the Dash dashboard while you drive, including when the app is in the background or the screen is locked.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "DashRelay sends your location to the Dash dashboard while you drive.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_FILE = DashRelay/Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -814,11 +814,11 @@
 				DEVELOPMENT_TEAM = LGQX79QMNJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DashRelay/Info.plist;
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "DashRelay sends your location to the Dash dashboard while you drive, including when the app is in the background or the screen is locked.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "DashRelay sends your location to the Dash dashboard while you drive.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_FILE = DashRelay/Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
