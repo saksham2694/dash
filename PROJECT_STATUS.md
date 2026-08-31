@@ -7,7 +7,9 @@ without conversation history.
 - **Last updated:** 2026-09-01
 - **Branch:** `main`
 - **Latest commit:** `b3c98cb docs: add project status`
-- **Working tree:** the **connection/session layer** (§2 "Connection / session layer", §5 items 12–15) is implemented and tested but **not yet committed** as of this update.
+- **Working tree (not yet committed as of this update):** the **connection/session layer**
+  (§2 "Connection / session layer", §5 items 12–16) *and* the **first connection/setup
+  UI** (`ConnectionSetupView`, `RootView` gate — §3 "Dash").
 - **Authoritative requirements:** `PROJECT_SPEC.pdf` (repo root) — "iPad CarPlay-style Dashboard — Project Spec"
 - **Day-to-day guidance:** `CLAUDE.md` (repo root)
 
@@ -73,7 +75,7 @@ dash/
     │   └── GoogleMapsService.xcconfig.template # committed template
     ├── Dash/                        # iPad app target
     │   ├── DashApp.swift            # @main; owns LocationStore + ConnectionCoordinator + KnownDeviceStore; bootstraps Google Maps
-    │   ├── RootView.swift           # connection gate: dashboard only when isConnected, else throwaway placeholder
+    │   ├── RootView.swift           # connection gate: ContentView when isConnected, else ConnectionSetupView
     │   ├── ContentView.swift        # full-screen DashMapView (the "dashboard" behind the gate for now — placeholder shell)
     │   ├── Info.plist               # NSBonjourServices, GoogleMapsAPIKey = $(GOOGLE_MAPS_API_KEY)
     │   ├── Configuration/
@@ -86,6 +88,8 @@ dash/
     │   │   ├── ConnectionState.swift           # enum: disconnected / discovering / connecting / connected
     │   │   ├── ConnectionCoordinator.swift     # session layer: owns the transport, maps phase→ConnectionState, feeds LocationStore
     │   │   └── KnownDeviceStore.swift          # pairing / known-device persistence (KnownRelay); separate from connection
+    │   ├── Features/Connection/
+    │   │   └── ConnectionSetupView.swift       # the not-connected / setup screen (presentational; own feature folder)
     │   └── Features/Map/
     │       ├── MapProvider.swift               # protocol boundary + MapProviderID enum
     │       ├── MapCameraState.swift            # SDK-neutral camera value type + following(_:)
@@ -99,6 +103,7 @@ dash/
     │   ├── PacketLineBufferTests.swift
     │   ├── LocationStoreTests.swift
     │   ├── ConnectionCoordinatorTests.swift
+    │   ├── ConnectionSetupViewTests.swift
     │   ├── KnownDeviceStoreTests.swift
     │   ├── MapCameraStateTests.swift
     │   └── DashTests.swift          # scaffold `example()` — no-op, still present
@@ -137,8 +142,8 @@ CLLocationManager                                LocationReceiver (NWBrowser "_d
                                                      ├─ @Published latestPacket / signal
                                                      └─ watchdog Task: no packet in staleInterval ⇒ signal = .stale
                                                             │
-                                                  RootView: shows ContentView only when
-                                                  ConnectionCoordinator.isConnected, else a placeholder
+                                                  RootView: ContentView when
+                                                  ConnectionCoordinator.isConnected, else ConnectionSetupView
                                                      → ContentView (observes LocationStore)
                                                      → DashMapView(viewModel:, location: latestPacket)
                                                      → MapViewModel.update(with:) → camera.following(packet)
@@ -203,10 +208,12 @@ not replace their responsibilities.
   `LocationTracker`; `.stop()` stops it. `LocationTracker` also gained a
   `wantsTracking` gate so a late Core Location authorization callback can't
   re-`startUpdatingLocation()` after a deliberate stop.
-- **The dashboard is gated.** `RootView` shows `ContentView` only when
-  `ConnectionCoordinator.isConnected`; otherwise a deliberately minimal
-  placeholder (`ProgressView` + one line). Feature views never read connection
-  state.
+- **The dashboard is gated.** `RootView` shows `ContentView` (map/dashboard) only
+  when `ConnectionCoordinator.isConnected`; otherwise `ConnectionSetupView`. The
+  map is never shown without an active connection. `RootView` is the only place
+  that reads connection state for gating; `ContentView` and feature views never
+  see it. `ConnectionSetupView` is presentational — it takes a `ConnectionState`
+  and action closures, so it holds no copy of the state.
 - **Pairing state is independent.** `KnownDeviceStore` and `ConnectionCoordinator`
   hold no reference to each other. `KnownRelay` is keyed by Bonjour service name
   (spec §4) and the store already supports multiple devices. The hook that links
@@ -300,9 +307,21 @@ not replace their responsibilities.
   persisted as JSON in `UserDefaults`; `remember` / `forget` / `forgetAll` /
   `isKnown`; supports multiple devices. **This is storage only** — nothing
   decides *when* to remember a device yet.
-- **[Implemented]** `RootView` — gates the UI: `ContentView` when
-  `ConnectionCoordinator.isConnected`, otherwise a minimal placeholder. Throwaway
-  — the real setup/connection screens are a later milestone.
+- **[Implemented]** `RootView` — gates the UI: `ContentView` (dashboard) when
+  `ConnectionCoordinator.isConnected`, otherwise `ConnectionSetupView`. Wires the
+  setup screen's actions to `connection.disconnect()` / `connection.startSession()`.
+- **[Implemented]** `ConnectionSetupView` (`Features/Connection/`) — the first
+  connection/setup screen, shown whenever Dash is not connected. Presentational:
+  takes a `ConnectionState` + `onDisconnect` / `onReconnect` closures (no state
+  copy). Communicates *not connected*, whether it is *discovering / connecting*
+  (spinner + status line), and that a **DashRelay iPhone on the same Wi‑Fi** is
+  needed. Action shown *only when appropriate*: **Disconnect** while
+  `discovering` / `connecting`; **Search for DashRelay** while `disconnected`
+  (idle after a deliberate disconnect); nothing while `connected`. A nested
+  `ConnectionSetupView.Display` value type does the pure state → display mapping.
+  Layout is `GeometryReader` + `ScrollView` with a centred, width-capped
+  (`maxWidth: 460`) content column — works in iPad portrait and landscape (and
+  on iPhone). **No pairing controls.** Visuals are intentionally plain.
 - **[Implemented]** `DashApp` owns `LocationStore`, `ConnectionCoordinator`, and
   `KnownDeviceStore` as `@StateObject`s, injects them as `environmentObject`s,
   calls `connection.startSession()` in `.task`, and
@@ -343,6 +362,13 @@ not replace their responsibilities.
 - **[Verified · automated]** `KnownDeviceStoreTests` (7): starts empty, remember
   adds, remember is idempotent by id, forget removes, multiple devices,
   `forgetAll`, persists across store instances.
+- **[Verified · automated]** `ConnectionSetupViewTests` (5): the `Display` state →
+  screen mapping — `disconnected` offers *search* with no spinner; `discovering`
+  and `connecting` show a spinner and offer *Disconnect*; `connected` offers no
+  action; every state has status text.
+- **[Verified · simulator]** `ConnectionSetupView` rendered on the iPad simulator
+  in the `discovering` state, in both **portrait and landscape** (content stays
+  centred and width-capped, nothing clipped), and on iPhone portrait.
 - **[Verified · automated]** `MapCameraStateTests` + `MapViewModelTests` (7):
   default heading is `nil`, `following` re-centres and keeps zoom, negative
   heading → `nil`, zero heading kept, default provider is `.googleMaps`,
@@ -364,8 +390,9 @@ not replace their responsibilities.
   work, the Dash app running in the simulator discovered a real DashRelay
   advertising `_dashrelay._tcp` on the LAN, completed
   `discovering → connecting → connected`, and `RootView` switched from the
-  placeholder to the dashboard — exercising the new gate end to end. (Deliberate
-  disconnect and re-connect are covered by unit tests, not this manual check.)
+  not-connected screen to the dashboard — exercising the new gate end to end.
+  (Deliberate disconnect and re-connect are covered by unit tests, not this
+  manual check.)
 
 ### Automated test totals (all passing, 2026-09-01)
 
@@ -373,7 +400,7 @@ not replace their responsibilities.
 |---|---:|---|
 | `DashSharedTests` | 4 | `swift test` |
 | `DashRelayTests` | 20 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
-| `DashTests` | 49 (incl. 1 no-op scaffold) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+| `DashTests` | 54 (incl. 1 no-op scaffold) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
 
 ---
 
@@ -390,9 +417,10 @@ not replace their responsibilities.
   Simulator** (used "iPhone 17 Pro" during development). `DashUITests` /
   `DashRelayUITests` are Xcode scaffolds only — no real UI tests.
 - **Simulator smoke test:** the Dash app has been installed and launched on the
-  simulator to confirm the Google Maps SDK initialises and renders, and (with a
-  real DashRelay on the LAN) to confirm the connection gate reaches `.connected`
-  and shows the dashboard.
+  simulator to confirm the Google Maps SDK initialises and renders; (with a real
+  DashRelay on the LAN) that the connection gate reaches `.connected` and shows
+  the dashboard; and (without a relay) that `ConnectionSetupView` renders in the
+  `discovering` state on iPad portrait + landscape and iPhone portrait.
 - **Xcode project:** single `Dash.xcodeproj`, project object version 77
   (file-system-synchronized groups). `DashShared` is a local SPM package
   referenced by the project.
@@ -501,6 +529,16 @@ not replace their responsibilities.
     the rest of the app depends on the stable `disconnected / discovering /
     connecting / connected` vocabulary the spec's requirements used.
 
+17. **The connection/setup screen is presentational.** `ConnectionSetupView`
+    takes a `ConnectionState` + action closures rather than reading
+    `ConnectionCoordinator` from the environment. `RootView` is the container that
+    reads the single source and wires the actions. This keeps connection state
+    un-duplicated and makes the screen previewable/testable in any state
+    (`ConnectionSetupView.Display`). The dashboard falls back to the setup screen
+    on *any* non-connected state — including a brief incidental drop. Keeping the
+    dashboard visible with a "signal lost" overlay during short reconnects is a
+    deliberate later refinement (spec §3.7 / §4), not done here.
+
 ---
 
 ## 6. Current limitations / known issues
@@ -513,15 +551,17 @@ not replace their responsibilities.
   scaffold — no "Relay active" / last-sent-timestamp status screen (spec §3).
   `RelaySessionController` is injected as an `environmentObject` but nothing
   reads it yet, and there is no in-app "disconnect" control (only unit tests
-  call `stop()`).
-- **Connection state exists; connection UI does not.** `ConnectionCoordinator`
-  exposes `connectionState` and `RootView` gates on it, but the not-connected
-  view is a throwaway `ProgressView`. No user-facing reconnect indicator, no
-  "disconnect" button, no device chooser.
+  call `stop()`). *(Its UI is a separate task.)*
+- **Connection UI is minimal and not designed.** `ConnectionSetupView` covers
+  *not connected / discovering / connecting* with a Disconnect (or Search)
+  action, but the visuals are deliberately plain and there is no "GPS signal
+  lost" overlay on the dashboard, no device chooser, and the dashboard is torn
+  down on any brief drop (see decision 17).
 - **Pairing is storage-only.** `KnownDeviceStore` persists known devices and is
-  tested, but there is no pairing flow, no "Forget" affordance, and
-  `LocationReceiver` still connects to the **first** relay it discovers
-  regardless of what's remembered. A multi-relay picker is still needed.
+  tested, but there is no pairing flow, no "Forget" affordance, no pairing
+  controls in `ConnectionSetupView`, and `LocationReceiver` still connects to the
+  **first** relay it discovers regardless of what's remembered. A multi-relay
+  picker is still needed.
 - **`MapViewModel.swift` has 2 build warnings** (pre-existing, unrelated to this
   layer): `main actor-isolated static property 'default' can not be referenced
   from a nonisolated context` at lines 24 and 28 — the `camera: MapCameraState
@@ -554,12 +594,15 @@ not replace their responsibilities.
 
 From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
 
-- **[Implemented, not surfaced]** Connection/session *state machine* — done
-  (`ConnectionCoordinator`, `RelaySessionController`). What remains is **UI**:
-  a visible connection state, a watchdog "GPS signal lost" indicator, reconnect
-  feedback, and a "disconnect" control that calls `disconnect()` / `stop()`.
+- **[Implemented]** iPad connection/session state machine
+  (`ConnectionCoordinator`) **and** its first UI (`ConnectionSetupView` +
+  `RootView` gate) — see §3. **Still [Planned]** on top of it: a watchdog "GPS
+  signal lost" overlay on the dashboard, keeping the dashboard up during brief
+  reconnects instead of falling back to the setup screen, and a designed visual
+  pass.
 - **[Planned]** DashRelay `StatusView` (relay-active + last-sent timestamp) —
-  can now bind to `RelaySessionController.state` / `isTrackingLocation`.
+  can bind to `RelaySessionController.state` / `isTrackingLocation`.
+  *(Separate task — this milestone did not touch DashRelay UI.)*
 - **[Planned]** Device **pairing flow** — the storage exists (`KnownDeviceStore`);
   still needed: deciding when to remember a device (pair-on-connect or an explicit
   step), a multi-relay picker in/above `LocationReceiver` (it still auto-takes the
@@ -596,11 +639,11 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
 
 Roughly in order (adapts the spec §11 build order to where we are):
 
-1. **Connection / session UI.** Surface `ConnectionCoordinator.connectionState`
-   and `LocationStore.signal` (the "GPS signal lost" indicator); a
-   connecting/reconnecting view; a "disconnect" control wired to
-   `ConnectionCoordinator.disconnect()`. Replace the throwaway `RootView`
-   placeholder.
+1. **Connection UI, continued.** First cut is done (`ConnectionSetupView` +
+   `RootView` gate). Remaining: a "GPS signal lost" overlay driven by
+   `LocationStore.signal`, keep the dashboard visible during brief incidental
+   drops (only fall back to setup after a sustained/deliberate disconnect), and a
+   designed visual pass.
 2. **Pairing flow.** Multi-relay picker (above/inside `LocationReceiver`), decide
    when to `KnownDeviceStore.remember(...)` (using
    `ConnectionCoordinator.connectedDeviceName`), a "Forget" action, optionally
@@ -669,7 +712,8 @@ Git history on `main` (newest first):
 
 | Commit | Milestone |
 |---|---|
-| *(working tree, uncommitted)* | **connection/session layer** — iPad `ConnectionCoordinator` (`disconnected`/`discovering`/`connecting`/`connected`, `startSession()`/`disconnect()`, feeds `LocationStore`) + `RootView` gate; iPhone `RelaySessionController` (`stopped`/`waiting`/`connected`, `start()`/`stop()` controls GPS); `KnownDeviceStore` for pairing state (storage only). `LocationStore` narrowed to location data + watchdog (lost `linkPhase`). `LocationReceiver.Status` gains `connectedServiceName`; `LocationTracker` gains a `wantsTracking` gate. New: `ConnectionCoordinatorTests` (12), `KnownDeviceStoreTests` (7), `RelaySessionControllerTests` (8). Deliberate disconnect verified (unit) not to auto-reconnect and to stop GPS; gate verified in the simulator against a real relay. |
+| *(working tree, uncommitted — 2)* | **first connection/setup UI** — `ConnectionSetupView` in a new `Features/Connection/` feature folder: shown by `RootView` whenever Dash is not connected; communicates *not connected / discovering / connecting* and that a DashRelay iPhone on the same Wi‑Fi is needed; offers **Disconnect** only while discovering/connecting and **Search for DashRelay** while idle; no pairing controls. Presentational (`ConnectionState` + closures in, `ConnectionSetupView.Display` for the mapping). `RootView` gate simplified to `ContentView` ⟺ `isConnected` else `ConnectionSetupView`. New `ConnectionSetupViewTests` (5). Rendered on iPad portrait + landscape and iPhone portrait in the simulator. DashRelay UI untouched. |
+| *(working tree, uncommitted — 1)* | **connection/session layer** — iPad `ConnectionCoordinator` (`disconnected`/`discovering`/`connecting`/`connected`, `startSession()`/`disconnect()`, feeds `LocationStore`) + `RootView` gate; iPhone `RelaySessionController` (`stopped`/`waiting`/`connected`, `start()`/`stop()` controls GPS); `KnownDeviceStore` for pairing state (storage only). `LocationStore` narrowed to location data + watchdog (lost `linkPhase`). `LocationReceiver.Status` gains `connectedServiceName`; `LocationTracker` gains a `wantsTracking` gate. New: `ConnectionCoordinatorTests` (12), `KnownDeviceStoreTests` (7), `RelaySessionControllerTests` (8). Deliberate disconnect verified (unit) not to auto-reconnect and to stop GPS; gate verified in the simulator against a real relay. |
 | `b3c98cb` | **docs: add project status** — this document. |
 | `54fa7e8` | **feat(map): add live vehicle map** — bootstrap Google Maps in `DashApp`; `ContentView` shows a full-screen `DashMapView` fed from `LocationStore.latestPacket`; `GoogleMapProvider` gains a vehicle `GMSMarker` that follows the camera. Verified in the simulator (SDK 11.1.0 initialises, map + marker render). |
 | `61eb89a` | **feat(map): add map provider abstraction** — added the Google Maps SPM dependency (pinned 11.1.0, Dash target only) and the secure API-key config (xcconfig → Info.plist → `GoogleMapsConfiguration`); created `MapProvider` / `MapProviderID` / `MapCameraState` / `MapViewModel` / `DashMapView` / `GoogleMapProvider`; `MapCameraStateTests`. |
@@ -691,6 +735,10 @@ Git history on `main` (newest first):
   vehicle marker, SDK authenticated with the configured key).
 - **Connection gate reaches `.connected` against a real relay** — confirmed in
   the iOS Simulator: Dash discovered a live DashRelay on the LAN, ran
-  `discovering → connecting → connected`, and `RootView` swapped the placeholder
-  for the dashboard. The deliberate-disconnect and no-auto-reconnect behaviour is
-  covered by unit tests only, not this manual check.
+  `discovering → connecting → connected`, and `RootView` swapped to the dashboard.
+  The deliberate-disconnect and no-auto-reconnect behaviour is covered by unit
+  tests only, not this manual check.
+- **The dashboard is gated behind an active connection** — with no relay on the
+  LAN, `RootView` shows `ConnectionSetupView` (not the map), rendered in the
+  `discovering` state on iPad **portrait and landscape** and on iPhone portrait
+  in the iOS Simulator.
