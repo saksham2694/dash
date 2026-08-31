@@ -9,6 +9,7 @@
 //  `MapCameraState` / `DashMapView`.
 //
 
+import CoreLocation
 import GoogleMaps
 import SwiftUI
 
@@ -26,18 +27,40 @@ private struct GoogleMapContainer: UIViewRepresentable {
 
     let camera: MapCameraState
 
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> GMSMapView {
         let mapView = GMSMapView()
         mapView.camera = Self.cameraPosition(camera)
         mapView.settings.compassButton = true
         mapView.settings.rotateGestures = true
-        // The camera is driven from LocationStore, not the device's own GPS.
+        // The camera is driven from LocationStore's relayed GPS, not the iPad's
+        // own CoreLocation (it has no GPS chip) — so no "my location" blue dot.
         mapView.isMyLocationEnabled = false
+
+        let marker = GMSMarker()
+        marker.position = Self.coordinate(camera)
+        marker.title = "Vehicle"
+        // Keep the marker upright while the map rotates under it.
+        marker.rotation = 0
+        marker.map = mapView
+        context.coordinator.vehicleMarker = marker
+
         return mapView
     }
 
     func updateUIView(_ mapView: GMSMapView, context: Context) {
         mapView.animate(to: Self.cameraPosition(camera))
+        context.coordinator.vehicleMarker?.position = Self.coordinate(camera)
+    }
+
+    /// Holds the marker so it can be moved across updates instead of recreated.
+    final class Coordinator {
+        var vehicleMarker: GMSMarker?
+    }
+
+    private static func coordinate(_ camera: MapCameraState) -> CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: camera.latitude, longitude: camera.longitude)
     }
 
     private static func cameraPosition(_ camera: MapCameraState) -> GMSCameraPosition {
