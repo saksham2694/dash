@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		407EC624304603B5007A11BB /* DashShared in Frameworks */ = {isa = PBXBuildFile; productRef = 407EC623304603B5007A11BB /* DashShared */; };
+		40FACE01304603B5007A11BB /* DashShared in Frameworks */ = {isa = PBXBuildFile; productRef = 40FACE02304603B5007A11BB /* DashShared */; };
+		40FACE03304603B5007A11BB /* DashShared in Frameworks */ = {isa = PBXBuildFile; productRef = 40FACE04304603B5007A11BB /* DashShared */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		407EC5DB3045F8FD007A11BB /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -21,13 +27,40 @@
 			remoteGlobalIDString = 407EC5CC3045F8FB007A11BB;
 			remoteInfo = Dash;
 		};
+		407EC608304602D4007A11BB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 407EC5C53045F8FA007A11BB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 407EC5FA304602D2007A11BB;
+			remoteInfo = DashRelay;
+		};
+		407EC612304602D4007A11BB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 407EC5C53045F8FA007A11BB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 407EC5FA304602D2007A11BB;
+			remoteInfo = DashRelay;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		407EC5CD3045F8FB007A11BB /* Dash.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dash.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		407EC5DA3045F8FD007A11BB /* DashTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DashTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		407EC5E43045F8FD007A11BB /* DashUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DashUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		407EC5FB304602D2007A11BB /* DashRelay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DashRelay.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		407EC607304602D4007A11BB /* DashRelayTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DashRelayTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		407EC611304602D4007A11BB /* DashRelayUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DashRelayUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		40FACE05304603B5007A11BB /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 407EC5FA304602D2007A11BB /* DashRelay */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		407EC5CF3045F8FB007A11BB /* Dash */ = {
@@ -45,6 +78,24 @@
 			path = DashUITests;
 			sourceTree = "<group>";
 		};
+		407EC5FC304602D2007A11BB /* DashRelay */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				40FACE05304603B5007A11BB /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+			);
+			path = DashRelay;
+			sourceTree = "<group>";
+		};
+		407EC60A304602D4007A11BB /* DashRelayTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DashRelayTests;
+			sourceTree = "<group>";
+		};
+		407EC614304602D4007A11BB /* DashRelayUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DashRelayUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -52,6 +103,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				407EC624304603B5007A11BB /* DashShared in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -69,6 +121,29 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		407EC5F8304602D2007A11BB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				40FACE01304603B5007A11BB /* DashShared in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		407EC604304602D4007A11BB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				40FACE03304603B5007A11BB /* DashShared in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		407EC60E304602D4007A11BB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -78,6 +153,10 @@
 				407EC5CF3045F8FB007A11BB /* Dash */,
 				407EC5DD3045F8FD007A11BB /* DashTests */,
 				407EC5E73045F8FD007A11BB /* DashUITests */,
+				407EC5FC304602D2007A11BB /* DashRelay */,
+				407EC60A304602D4007A11BB /* DashRelayTests */,
+				407EC614304602D4007A11BB /* DashRelayUITests */,
+				407EC62530460430007A11BB /* Frameworks */,
 				407EC5CE3045F8FB007A11BB /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,8 +167,18 @@
 				407EC5CD3045F8FB007A11BB /* Dash.app */,
 				407EC5DA3045F8FD007A11BB /* DashTests.xctest */,
 				407EC5E43045F8FD007A11BB /* DashUITests.xctest */,
+				407EC5FB304602D2007A11BB /* DashRelay.app */,
+				407EC607304602D4007A11BB /* DashRelayTests.xctest */,
+				407EC611304602D4007A11BB /* DashRelayUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		407EC62530460430007A11BB /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -112,6 +201,7 @@
 			);
 			name = Dash;
 			packageProductDependencies = (
+				407EC623304603B5007A11BB /* DashShared */,
 			);
 			productName = Dash;
 			productReference = 407EC5CD3045F8FB007A11BB /* Dash.app */;
@@ -163,6 +253,76 @@
 			productReference = 407EC5E43045F8FD007A11BB /* DashUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		407EC5FA304602D2007A11BB /* DashRelay */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 407EC619304602D4007A11BB /* Build configuration list for PBXNativeTarget "DashRelay" */;
+			buildPhases = (
+				407EC5F7304602D2007A11BB /* Sources */,
+				407EC5F8304602D2007A11BB /* Frameworks */,
+				407EC5F9304602D2007A11BB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				407EC5FC304602D2007A11BB /* DashRelay */,
+			);
+			name = DashRelay;
+			packageProductDependencies = (
+				40FACE02304603B5007A11BB /* DashShared */,
+			);
+			productName = DashRelay;
+			productReference = 407EC5FB304602D2007A11BB /* DashRelay.app */;
+			productType = "com.apple.product-type.application";
+		};
+		407EC606304602D4007A11BB /* DashRelayTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 407EC61C304602D4007A11BB /* Build configuration list for PBXNativeTarget "DashRelayTests" */;
+			buildPhases = (
+				407EC603304602D4007A11BB /* Sources */,
+				407EC604304602D4007A11BB /* Frameworks */,
+				407EC605304602D4007A11BB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				407EC609304602D4007A11BB /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				407EC60A304602D4007A11BB /* DashRelayTests */,
+			);
+			name = DashRelayTests;
+			packageProductDependencies = (
+				40FACE04304603B5007A11BB /* DashShared */,
+			);
+			productName = DashRelayTests;
+			productReference = 407EC607304602D4007A11BB /* DashRelayTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		407EC610304602D4007A11BB /* DashRelayUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 407EC61F304602D4007A11BB /* Build configuration list for PBXNativeTarget "DashRelayUITests" */;
+			buildPhases = (
+				407EC60D304602D4007A11BB /* Sources */,
+				407EC60E304602D4007A11BB /* Frameworks */,
+				407EC60F304602D4007A11BB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				407EC613304602D4007A11BB /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				407EC614304602D4007A11BB /* DashRelayUITests */,
+			);
+			name = DashRelayUITests;
+			packageProductDependencies = (
+			);
+			productName = DashRelayUITests;
+			productReference = 407EC611304602D4007A11BB /* DashRelayUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -184,6 +344,17 @@
 						CreatedOnToolsVersion = 26.6;
 						TestTargetID = 407EC5CC3045F8FB007A11BB;
 					};
+					407EC5FA304602D2007A11BB = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					407EC606304602D4007A11BB = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 407EC5FA304602D2007A11BB;
+					};
+					407EC610304602D4007A11BB = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 407EC5FA304602D2007A11BB;
+					};
 				};
 			};
 			buildConfigurationList = 407EC5C83045F8FA007A11BB /* Build configuration list for PBXProject "Dash" */;
@@ -195,6 +366,9 @@
 			);
 			mainGroup = 407EC5C43045F8FA007A11BB;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				407EC622304603B5007A11BB /* XCLocalSwiftPackageReference "../DashShared" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 407EC5CE3045F8FB007A11BB /* Products */;
 			projectDirPath = "";
@@ -203,6 +377,9 @@
 				407EC5CC3045F8FB007A11BB /* Dash */,
 				407EC5D93045F8FD007A11BB /* DashTests */,
 				407EC5E33045F8FD007A11BB /* DashUITests */,
+				407EC5FA304602D2007A11BB /* DashRelay */,
+				407EC606304602D4007A11BB /* DashRelayTests */,
+				407EC610304602D4007A11BB /* DashRelayUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -223,6 +400,27 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		407EC5E23045F8FD007A11BB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		407EC5F9304602D2007A11BB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		407EC605304602D4007A11BB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		407EC60F304602D4007A11BB /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -253,6 +451,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		407EC5F7304602D2007A11BB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		407EC603304602D4007A11BB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		407EC60D304602D4007A11BB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -265,6 +484,16 @@
 			isa = PBXTargetDependency;
 			target = 407EC5CC3045F8FB007A11BB /* Dash */;
 			targetProxy = 407EC5E53045F8FD007A11BB /* PBXContainerItemProxy */;
+		};
+		407EC609304602D4007A11BB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 407EC5FA304602D2007A11BB /* DashRelay */;
+			targetProxy = 407EC608304602D4007A11BB /* PBXContainerItemProxy */;
+		};
+		407EC613304602D4007A11BB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 407EC5FA304602D2007A11BB /* DashRelay */;
+			targetProxy = 407EC612304602D4007A11BB /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -540,6 +769,160 @@
 			};
 			name = Release;
 		};
+		407EC61A304602D4007A11BB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LGQX79QMNJ;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "DashRelay sends your location to the Dash dashboard while you drive, including when the app is in the background or the screen is locked.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "DashRelay sends your location to the Dash dashboard while you drive.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_FILE = DashRelay/Info.plist;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sakshamsharma.DashRelay;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		407EC61B304602D4007A11BB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LGQX79QMNJ;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "DashRelay sends your location to the Dash dashboard while you drive, including when the app is in the background or the screen is locked.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "DashRelay sends your location to the Dash dashboard while you drive.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_FILE = DashRelay/Info.plist;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sakshamsharma.DashRelay;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		407EC61D304602D4007A11BB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LGQX79QMNJ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sakshamsharma.DashRelayTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DashRelay.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DashRelay";
+			};
+			name = Debug;
+		};
+		407EC61E304602D4007A11BB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LGQX79QMNJ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sakshamsharma.DashRelayTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DashRelay.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DashRelay";
+			};
+			name = Release;
+		};
+		407EC620304602D4007A11BB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LGQX79QMNJ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sakshamsharma.DashRelayUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = DashRelay;
+			};
+			name = Debug;
+		};
+		407EC621304602D4007A11BB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LGQX79QMNJ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sakshamsharma.DashRelayUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = DashRelay;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -579,7 +962,56 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		407EC619304602D4007A11BB /* Build configuration list for PBXNativeTarget "DashRelay" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				407EC61A304602D4007A11BB /* Debug */,
+				407EC61B304602D4007A11BB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		407EC61C304602D4007A11BB /* Build configuration list for PBXNativeTarget "DashRelayTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				407EC61D304602D4007A11BB /* Debug */,
+				407EC61E304602D4007A11BB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		407EC61F304602D4007A11BB /* Build configuration list for PBXNativeTarget "DashRelayUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				407EC620304602D4007A11BB /* Debug */,
+				407EC621304602D4007A11BB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		407EC622304603B5007A11BB /* XCLocalSwiftPackageReference "../DashShared" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../DashShared;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		407EC623304603B5007A11BB /* DashShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DashShared;
+		};
+		40FACE02304603B5007A11BB /* DashShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DashShared;
+		};
+		40FACE04304603B5007A11BB /* DashShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DashShared;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 407EC5C53045F8FA007A11BB /* Project object */;
 }
