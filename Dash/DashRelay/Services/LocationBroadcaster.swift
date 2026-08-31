@@ -19,8 +19,9 @@ import Network
 /// main-actor delegate callback without an `await` hop.
 final class LocationBroadcaster: @unchecked Sendable {
 
-    /// The Bonjour service type both apps agree on (spec §3/§4).
-    static let serviceType = "_dashrelay._tcp"
+    /// The Bonjour service type both apps agree on (spec §3/§4). Defined once in
+    /// `DashShared` so the relay and the dashboard can't drift apart.
+    static let serviceType = LocationWireFormat.bonjourServiceType
 
     struct Status: Equatable, Sendable {
         var isListening = false
@@ -75,21 +76,14 @@ final class LocationBroadcaster: @unchecked Sendable {
         }
     }
 
-    // MARK: - Wire framing (pure, testable)
+    // MARK: - Wire framing
 
-    /// A `JSONEncoder` configured for the shared wire format. Kept in one place so
-    /// the (future) iPad receiver can decode with the matching strategy.
-    static func makeEncoder() -> JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }
+    /// A `JSONEncoder` configured for the shared wire format.
+    static func makeEncoder() -> JSONEncoder { LocationWireFormat.makeEncoder() }
 
     /// One `LocationPacket` as compact JSON followed by a single `\n` delimiter.
     static func encodeLine(_ packet: LocationPacket, using encoder: JSONEncoder = LocationBroadcaster.makeEncoder()) throws -> Data {
-        var data = try encoder.encode(packet)
-        data.append(0x0A) // "\n"
-        return data
+        try LocationWireFormat.encodeLine(packet, using: encoder)
     }
 
     // MARK: - Listener (queue-confined)
