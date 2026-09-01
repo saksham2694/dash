@@ -17,11 +17,13 @@ import GoogleMaps
 enum GoogleMapsConfiguration {
 
     /// Info.plist key that carries the build-injected API key.
-    static let infoPlistKey = "GoogleMapsAPIKey"
+    nonisolated static let infoPlistKey = "GoogleMapsAPIKey"
 
     /// The configured key, or `nil` when it wasn't supplied for this build
     /// (e.g. a fresh checkout before `GoogleMapsService.xcconfig` is filled in).
-    static var apiKey: String? {
+    /// `nonisolated` — it is a plain thread-safe `Bundle.main` read, so
+    /// non-main-actor callers (e.g. `GoogleRouteService`) can use it too.
+    nonisolated static var apiKey: String? {
         guard
             let value = Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? String,
             !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

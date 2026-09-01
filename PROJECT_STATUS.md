@@ -12,6 +12,14 @@ without conversation history.
 - **Everything through M2 is committed.** The connection/pairing/relay-status work
   (previously "working tree" in this doc) landed in `9a02364` / `ec4d4a9` /
   `c3a3a18`; the Map M1 + M2 work landed in `973ffc9`. See §10 for the mapping.
+- **Working tree (not yet committed):** the **Map "M3" routing** layer — a
+  provider-neutral `RouteService` + `Route` domain model, `GoogleRouteService`
+  (Google Routes API, REST — no SDK), an encoded-polyline decoder, a `RouteViewModel`
+  (loading / loaded / no-location / failed), a small `RouteStatusView` pill, and
+  `MapViewModel.setRoute(_:)` drawing the route as an existing `MapPolyline` +
+  re-fitting the `.destinationPreview` camera around vehicle + destination + route.
+  No navigation camera, no turn-by-turn, no rerouting.
+  **Needs the "Routes API" enabled in Google Cloud** (§9). See §5 item 26, §10.
 - **Most recent follow-up (in `973ffc9`):** on-device testing of M2 autocomplete
   showed the suggestion-row **secondary line and trailing distance were invisible**
   — `.foregroundStyle(.secondary)` / `.tertiary` are translucent and wash out
@@ -116,13 +124,20 @@ dash/
     │       ├── MapViewModel.swift              # holds provider + mode + destination; derives MapContent; setDestination(_:); routes MapEvent
     │       ├── DashMapView.swift               # neutral SwiftUI component
     │       ├── GoogleMapProvider.swift         # ONLY Map file importing GoogleMaps; wraps GMSMapView, diffs overlays, bridges the delegate
-    │       └── Search/                         # M2 — destination search (all SDK-neutral except GooglePlaceSearchService.swift)
-    │           ├── Destination.swift           # Destination + PlaceSuggestion value types
-    │           ├── PlaceSearchService.swift    # provider-neutral protocol (suggestions / details) + PlaceSearchError
-    │           ├── GooglePlaceSearchService.swift  # ONLY Map file importing GooglePlaces; autocomplete + place details (New), session token
-    │           ├── DestinationStore.swift      # @MainActor ObservableObject — the chosen Destination? (source of truth)
-    │           ├── PlaceSearchViewModel.swift  # SDK-free: debounce, suggestions, resolve-to-Destination via onDestinationChosen
-    │           └── MapSearchView.swift         # custom search field + suggestions list + selected-destination chip (presentational)
+    │       ├── Search/                         # M2 — destination search (all SDK-neutral except GooglePlaceSearchService.swift)
+    │       │   ├── Destination.swift           # Destination + PlaceSuggestion value types
+    │       │   ├── PlaceSearchService.swift    # provider-neutral protocol (suggestions / details) + PlaceSearchError
+    │       │   ├── GooglePlaceSearchService.swift  # ONLY Map file importing GooglePlaces; autocomplete + place details (New), session token
+    │       │   ├── DestinationStore.swift      # @MainActor ObservableObject — the chosen Destination? (source of truth)
+    │       │   ├── PlaceSearchViewModel.swift  # SDK-free: debounce, suggestions, resolve-to-Destination via onDestinationChosen
+    │       │   └── MapSearchView.swift         # custom search field + suggestions list + selected-destination chip (presentational)
+    │       └── Routing/                        # M3 — driving route (NO SDK anywhere; GoogleRouteService is REST-only)
+    │           ├── Route.swift                 # SDK-neutral: polyline [MapCoordinate] + distanceMeters + Duration
+    │           ├── RouteService.swift          # provider-neutral protocol (route(from:to:)) + RouteError
+    │           ├── GoogleRouteService.swift    # Google Routes API over URLSession; imports Foundation only; reuses GoogleMapsConfiguration.apiKey
+    │           ├── GooglePolyline.swift        # pure encoded-polyline decoder
+    │           ├── RouteViewModel.swift        # SDK-free: idle / loading / loaded / noCurrentLocation / failed
+    │           └── RouteStatusView.swift       # small transient loading/error pill (presentational)
     │   # (spec-planned but NOT present: Models/, Features/Music, Features/Speedometer,
     │   #  Features/Settings, Home/DashboardView, Core/ThemeManager)
     ├── DashTests/                   # Swift Testing
@@ -136,6 +151,7 @@ dash/
     │   ├── MapCameraStateTests.swift          # location -> camera transform; MapViewModel basics
     │   ├── MapContentTests.swift              # MapCoordinateBounds math; MapViewModel content/mode/destination derivation
     │   ├── PlaceSearchTests.swift             # PlaceSearchViewModel (debounce/resolve, stub service) + DestinationStore
+    │   ├── RouteTests.swift                   # M3: Route model, polyline decode, Routes request/response mapping, RouteViewModel, MapViewModel.setRoute
     │   └── DashTests.swift          # scaffold `example()` — no-op, still present
     ├── DashUITests/                 # Xcode scaffold only, no real tests
     └── DashRelay/                   # iPhone app target
@@ -214,22 +230,31 @@ store and transport logic stays in the receiver.
   (service type + JSON/date strategy + `\n` framing) and now `RelayAdvertisement`
   (the Bonjour TXT-record contract: `rid` + `name`) are defined once. `DashRelay`
   and `Dash` both go through them.
-- **The map is isolated behind `MapProvider`; search is isolated behind
-  `PlaceSearchService`.** `import GoogleMaps` appears in exactly two files
-  (`GoogleMapProvider.swift`, `GoogleMapsConfiguration.swift`); `import GooglePlaces`
-  in exactly two (`GooglePlaceSearchService.swift`, `GooglePlacesConfiguration.swift`).
-  Every other Map / Search file is SDK-free. `MapProvider` is **rendering only**
-  (a `MapContent` value in, a `MapEvent` closure back) — it has no search /
-  routing / place methods. Place search / autocomplete / details live on the
-  **separate `PlaceSearchService` protocol** (M2), so a MapKit provider can back
-  it with `MKLocalSearch` without touching the renderer. The chosen destination
-  is SDK-neutral (`Destination`) and held in its own `DestinationStore`.
+- **Three separate boundaries: render behind `MapProvider`, search behind
+  `PlaceSearchService`, routing behind `RouteService`.** `import GoogleMaps`
+  appears in exactly two files (`GoogleMapProvider.swift`,
+  `GoogleMapsConfiguration.swift`); `import GooglePlaces` in exactly two
+  (`GooglePlaceSearchService.swift`, `GooglePlacesConfiguration.swift`). **No
+  routing file imports any SDK at all** — `GoogleRouteService` calls the Routes
+  API over `URLSession` and imports only Foundation. Every other Map / Search /
+  Routing file is SDK-free. `MapProvider` is **rendering only** (a `MapContent`
+  value in, a `MapEvent` closure back) — it has no search / routing / place
+  methods. Place search lives on the **`PlaceSearchService` protocol** (M2);
+  route computation on the **`RouteService` protocol** (M3, `route(from:to:)`
+  taking plain `MapCoordinate`s) — so a MapKit provider could back either with
+  `MKLocalSearch` / `MKDirections` without touching the renderer. The chosen
+  destination (`Destination`) is held in `DestinationStore`; the computed
+  `Route` is SDK-neutral (polyline + distance + `Duration`).
 - **The map receives state as input, emits events as output.** `MapViewModel`
   holds no `LocationStore` reference, no networking, no GPS. It converts a
   `LocationPacket` into a follow `MapCameraState` (pure `following(_:)`), assembles
   the full `MapContent` (camera plan + vehicle + overlays) for the active
-  `MapMode`, and routes `MapEvent`s back. Overlay lists and the non-`cruising`
-  modes are modelled but not yet populated (no routes/search exist).
+  `MapMode`, and routes `MapEvent`s back. As of M3 `MapContent.markers` (the
+  destination pin) and `MapContent.polylines` (the route, via `setRoute(_:)`)
+  are both populated; `MapEvent` consumption still awaits navigation.
+  `setRoute(_:)` re-fits the `.destinationPreview` camera **once**, around
+  vehicle + destination + route, so the whole route is visible — a later fix
+  still does not move it (that would be navigation camera behaviour, deferred).
 - **Bonjour discovery, never a hardcoded IP** — on both sides.
 - **The receiver connects to ONE identified relay, not "results.first".**
   `LocationReceiver` browses continuously, reports every visible relay via
@@ -555,10 +580,39 @@ not replace their responsibilities.
     compact chip (name / address / clear button) once a destination is chosen.
     Presentational; no SDK, no map, no store.
   - `ContentView` — the composition point: owns `MapViewModel`,
-    `PlaceSearchViewModel`, `DestinationStore`; wires
+    `PlaceSearchViewModel`, `DestinationStore` (+ `RouteViewModel`, M3); wires
     `searchVM.onDestinationChosen → destinationStore.select`,
-    `destinationStore.destination → mapVM.setDestination`, and the vehicle
-    coordinate → `searchVM.origin`. The three components don't know each other.
+    `destinationStore.destination → mapVM.setDestination` + `routeVM.requestRoute`,
+    `routeVM.state (.loaded) → mapVM.setRoute`, and the vehicle coordinate →
+    `searchVM.origin` / the routing origin. The components don't know each other.
+- **[Implemented]** Routing (M3 — see §5 item 26):
+  - `Route` — SDK-neutral: `polyline: [MapCoordinate]`, `distanceMeters`,
+    `duration: Duration`. Geometry is all M3 renders; distance/duration are kept
+    for M4 (not shown anywhere in M3).
+  - `RouteService` — provider-neutral `@MainActor` protocol:
+    `route(from origin: MapCoordinate, to destination: MapCoordinate) async throws
+    -> Route`; `RouteError` (`noRoute` / `unavailable`). **Separate from
+    `MapProvider` and `PlaceSearchService`.**
+  - `GoogleRouteService` — the Google **Routes API** (`POST
+    routes.googleapis.com/directions/v2:computeRoutes`, `TRAFFIC_UNAWARE` DRIVE,
+    encoded-polyline). **Imports Foundation only — no GMS types**; `URLSession`
+    injected for tests; reuses `GoogleMapsConfiguration.apiKey` (now `nonisolated`).
+    Missing key / transport error / non-2xx (403 = API not enabled) → `.unavailable`;
+    empty or degenerate route → `.noRoute`.
+  - `GooglePolyline.decode(_:)` — pure encoded-polyline decoder.
+  - `RouteViewModel` — SDK-free, holds no `LocationStore`: `requestRoute(to:from:)`
+    takes the chosen `Destination?` + the latest origin (passed in by the
+    composing view), exposes `state` (`idle` / `loading` / `loaded(Route)` /
+    `noCurrentLocation` / `failed(RouteError)`), cancels any in-flight request.
+    **No automatic rerouting** — a new request only happens on a destination
+    change or an explicit Retry.
+  - `MapViewModel.setRoute(_ route: Route?)` — sets `content.polylines` to one
+    `MapPolyline(id: "route", …)` (or `[]`). **Never touches the camera.**
+    `setDestination(_:)` also clears the previous route.
+  - `RouteStatusView` — a small transient `.regularMaterial` pill under the
+    search card: spinner + "Finding route…", "Waiting for GPS…", or "Route
+    unavailable" + Retry. Nothing while idle or loaded. **Not** a nav sheet / ETA
+    surface.
 - **[Implemented]** `GoogleMapProvider` — the live Google Maps view, and the only
   Map file importing `GoogleMaps`. Wraps `GMSMapView` in a private
   `UIViewRepresentable`; the `Coordinator` owns the vehicle `GMSMarker` plus
@@ -568,16 +622,17 @@ not replace their responsibilities.
   translates tap + `idleAt` callbacks (with a `willMove(byGesture:)` flag) into
   `MapEvent`s. `isMyLocationEnabled = false` (position comes from the relay, not
   the iPad's own CoreLocation). Existing behaviour preserved: vehicle marker,
-  follow camera, `.follow` animation on update. Overlay rendering paths exist but
-  receive no data yet.
+  follow camera, `.follow` animation on update. The `GMSPolyline` sync path
+  (`strokeWidth 6`, `.systemBlue`) is what draws the **M3 route** — no
+  `GoogleMapProvider` change was needed for M3, the M1 pass had already built it.
 - **[Implemented]** `GoogleMapsConfiguration` — reads `GoogleMapsAPIKey` from the
   bundle (build-injected, see §9), exposes it as `apiKey`, and calls
   `GMSServices.provideAPIKey`; returns `false` and does nothing if unset. No key
   in source. `GooglePlacesConfiguration.bootstrap()` reuses the same `apiKey` for
   `GMSPlacesClient.provideAPIKey`. Both are called from `DashApp.init()`.
 - **[Implemented]** `ContentView` currently renders a full-screen `DashMapView`
-  with the `MapSearchView` overlay (temporary shell — this is **not** the
-  dashboard layout).
+  with the `MapSearchView` + `RouteStatusView` overlay (temporary shell — this is
+  **not** the dashboard layout).
 - **[Verified · automated]** `PacketLineBufferTests` (9): single line, two lines
   per chunk, line split across chunks, partial trailing line held, blank lines
   ignored, malformed line skipped, oversized line dropped then recovers, `reset()`,
@@ -655,6 +710,24 @@ not replace their responsibilities.
   debounced path runs, clearing the query wipes results, `choose` resolves →
   `onDestinationChosen` + field reset, a failed resolve shows an error + hands
   out nothing, `reset` clears. **Google's SDK is not exercised** — a stub stands in.
+- **[Verified · automated]** `RouteTests` (28 — M3): `Route` equality + metric
+  retention; `GooglePolyline.decode` against Google's reference string, empty,
+  and truncated input; `GoogleRouteService.makeRequest` (POST, endpoint, key +
+  field-mask headers, DRIVE body with the right lat/lngs) and `parseRoute` from
+  canned JSON (success, empty `routes`, degenerate 1-point polyline, malformed
+  JSON) + duration parsing; `GoogleRouteService` end-to-end with a **mocked
+  `URLSession`** (200 → route, 403 → `.unavailable`, transport throw →
+  `.unavailable`, no key → `.unavailable` with no network call); `RouteViewModel`
+  (loads via a stub service, `noCurrentLocation` when origin is nil and no
+  service call, `.failed` on `RouteError`, unexpected error normalised, clear →
+  idle, new request cancels the in-flight one); `MapViewModel.setRoute` (one
+  keyed polyline, `nil` clears, a new destination clears the old route; **in
+  `.destinationPreview` the loaded route re-fits the `.fit` camera to
+  vehicle + destination + route, clearing it re-fits back, a later fix does not
+  move it; in `.cruising` the camera is never touched**). **The live Routes API
+  is not called** — canned data / a mock transport stand in. The M2
+  `previewCameraFitsBoth` / `previewCameraStaysWhileVehicleMoves` tests are
+  unchanged and still pass (route-less path).
 - **[Verified · on device / simulator]** Dash builds (clean, no warnings). Before
   the M1 pass it launched, initialised the Google Maps SDK (v11.1.0), and
   rendered the map + vehicle marker.
@@ -670,6 +743,14 @@ not replace their responsibilities.
   destination pin dropping on the map, and the `.destinationPreview` camera
   framing. The `GoogleMapProvider` delegate/diffing rewrite (M1) is also still
   only unit-covered + clean-build (see §6).
+- **[NOT verified on device]** All of **M3 routing**. Builds clean, 28 unit tests
+  pass, but nothing has hit the **live Routes API** — the endpoint URL, header
+  names, request body shape, response field names and the encoded-polyline output
+  are coded to Google's current docs and are unverified against a real response.
+  The route polyline drawing on `GMSMapView`, the preview-camera re-fit around the
+  route, the `RouteStatusView` pill, and the Retry action are likewise unverified
+  on a screen. **The Routes API is not confirmed enabled** in the Google Cloud
+  project (§9).
 
 ### End-to-end
 
@@ -708,10 +789,11 @@ not replace their responsibilities.
 |---|---:|---|
 | `DashSharedTests` | 8 | `swift test` |
 | `DashRelayTests` | 32 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
-| `DashTests` | 104 (per the Xcode test plan; incl. 1 no-op scaffold) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+| `DashTests` | 132 (per the Xcode test plan; incl. 1 no-op scaffold; +28 for M3 `RouteTests`) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
 
 Last full run (`xcodebuild test -scheme Dash -only-testing:DashTests`, iPad
-simulator, 2026-09-02): all pass, build clean with no warnings.
+simulator, 2026-09-02, with M3 in the working tree): all pass, build clean with
+no warnings.
 
 `DashSharedTests` breakdown: `LocationPacketTests` (4), `RelayAdvertisementTests` (4).
 `DashRelayTests` breakdown: `LocationTrackerTests` (7), `LocationBroadcasterTests`
@@ -720,13 +802,17 @@ simulator, 2026-09-02): all pass, build clean with no warnings.
 `DashTests` (connection/pairing-relevant): `ConnectionCoordinatorTests` (22),
 `ConnectionSetupViewTests` (8), `ConnectedControlViewTests` (2),
 `KnownDeviceStoreTests` (7), `LocationReceiverTests` (7).
-`DashTests` (map): `MapCameraStateTests` (4) + `MapViewModelTests` (3) in
-`MapCameraStateTests.swift`; `MapCoordinateBoundsTests` (4) +
-`MapViewModelContentTests` (12) in `MapContentTests.swift`;
-`DestinationStoreTests` (2) + `PlaceSearchViewModelTests` (9) in
-`PlaceSearchTests.swift`.
-(Map / search have no SDK-level tests — `GoogleMapProvider` / `GMSMapView` /
-`GooglePlaceSearchService` / `GMSPlacesClient` stay device-validated.)
+`DashTests` (map): `MapCameraStateTests` + `MapViewModelTests` in
+`MapCameraStateTests.swift`; `MapCoordinateBoundsTests` + `MapViewModelContentTests`
+in `MapContentTests.swift`; `GooglePlaceSuggestionMappingTests` +
+`DestinationStoreTests` + `PlaceSearchViewModelTests` in `PlaceSearchTests.swift`;
+`RouteModelTests` + `GooglePolylineTests` + `GoogleRouteServiceMappingTests` +
+`GoogleRouteServiceTests` + `RouteViewModelTests` + `MapViewModelRouteTests` (28
+total) in `RouteTests.swift`.
+(Map / search / routing have no SDK-level tests — `GoogleMapProvider` /
+`GMSMapView`, `GooglePlaceSearchService` / `GMSPlacesClient`, and the live Routes
+API stay device-validated. `GoogleRouteService` is unit-tested with a mocked
+`URLSession`.)
 
 ---
 
@@ -1032,6 +1118,40 @@ simulator, 2026-09-02): all pass, build clean with no warnings.
     - **`MapMode.destinationPreview` is now realised** (was a fall-back-to-follow
       stub in item 24). `.navigating` still falls back.
 
+26. **Map "M3": routing behind a third service abstraction (2026-09-02).** Given
+    the vehicle position + the chosen `Destination`, fetch a driving route and
+    draw its geometry. **Routing only — no turn-by-turn, no maneuver instructions,
+    no navigation / ahead-of-vehicle camera, no vehicle heading/arrow, no
+    automatic rerouting, no voice, no dashboard work.**
+    - **`RouteService` is a third protocol, separate from `MapProvider` and
+      `PlaceSearchService`** (continuing item 24's plan). It takes plain
+      `MapCoordinate`s — not a `Destination`, not a place id — so it stays
+      provider-neutral and an Apple `MKDirections` impl slots in later.
+    - **`GoogleRouteService` imports no SDK.** The Routes API is REST
+      (`routes.googleapis.com`), so it is `URLSession` + `Codable` only. The
+      transport and the key accessor are injected, so it is fully unit-tested
+      with a mock — no live call in CI. `GoogleMapsConfiguration.apiKey` /
+      `.infoPlistKey` were marked `nonisolated` (a plain `Bundle.main` read) so a
+      non-main-actor default argument can use it; no behaviour change.
+    - **The routing layer owns no GPS.** `RouteViewModel` holds no `LocationStore`
+      — `ContentView` passes the latest origin in alongside the destination, the
+      same way it already feeds `PlaceSearchViewModel.origin`. No usable origin →
+      a distinct `.noCurrentLocation` state, no request sent.
+    - **The route renders through the existing overlay channel.** `MapViewModel.
+      setRoute(_:)` puts one `MapPolyline` on `MapContent.polylines`;
+      `GoogleMapProvider` already turns that into a `GMSPolyline` (built in M1).
+    - **The `.destinationPreview` camera fits vehicle + destination + route.**
+      `setRoute(_:)` re-derives the `.fit` bounds **once**, when the route loads
+      or clears, so the whole route is visible in preview (a wide-bowing route no
+      longer runs off-screen). This is a one-shot re-frame — a *later* fix still
+      does not move the camera (`update(with:)` leaves it alone in preview), so it
+      is not navigation / ahead-of-vehicle camera behaviour, which stays deferred
+      to M4. `.cruising` / `.navigating` are untouched — `setRoute` there does
+      nothing to the camera.
+    - **One route request per destination selection or explicit Retry.** No timer,
+      no re-request when a later fix arrives — matches the spec's "call
+      Directions/Routes once per trip" cost rule (§9).
+
 ---
 
 ## 6. Current limitations / known issues
@@ -1074,12 +1194,24 @@ simulator, 2026-09-02): all pass, build clean with no warnings.
   parsing, `setTargetRelay` connect/re-target logic, and reconnect-to-same-id
   behaviour are only exercised on device / by the `ConnectionCoordinator` stub
   tests. `RelayAdvertisement` parsing itself is unit-tested in `DashShared`.
-- **Partly-exercised map plumbing.** As of M2 `MapContent.markers`, the `.fit`
-  camera plan, and `MapMode.destinationPreview` are driven by a chosen
-  destination. Still inert until later milestones: `MapContent.polylines` and
-  `.navigating` (routing / nav), and every `MapEvent` case —
-  `MapViewModel.handle(_:)` is still a no-op, so a POI tap on the map does **not**
-  yet become a destination (only the search field does).
+- **Partly-exercised map plumbing.** As of M3 `MapContent.markers` (M2 pin),
+  `MapContent.polylines` (M3 route), the `.fit` camera plan, and
+  `MapMode.destinationPreview` are all driven. Still inert until later milestones:
+  `.navigating` mode, and every `MapEvent` case — `MapViewModel.handle(_:)` is
+  still a no-op, so a POI tap on the map does **not** yet become a destination
+  (only the search field does).
+- **M3: the preview camera re-fits once per route, not continuously.** When a
+  route loads it re-frames to fit vehicle + destination + route; it does **not**
+  keep re-fitting as the vehicle moves along the route (that is navigation camera
+  behaviour, M4). If the vehicle drives well past the framed box before "start
+  navigation" exists, the view will not follow.
+- **M3: no automatic route retry when GPS arrives.** If a destination is chosen
+  before the first fix, the state is `.noCurrentLocation` and stays there until
+  the user taps Retry (or re-selects). Deliberate — M3 has no location observer
+  in the routing layer and no auto-reroute.
+- **M3: `RouteViewModel` is not `MapMode`-aware.** A route is fetched whenever a
+  destination is set; there is no "start navigation" gate yet (that's M4). The
+  route simply appears in `.destinationPreview`.
 - **M2 autocomplete is device-verified; the rest of the map/search UI is not.**
   On the physical iPad, `GooglePlaceSearchService.suggestions(...)` +
   `mapSuggestion` field mapping + the `MapSearchView` suggestion list are
@@ -1163,19 +1295,22 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
   in `UserDefaults`.
 - **[Implemented]** Map rendering boundary for overlays + events + modes
   (§5 item 24): `MapContent`, `MapEvent`, `MapMode`, `MapCameraPlan.fit`.
-  `.markers` / `.fit` / `.destinationPreview` are now driven by M2; `.polylines`
-  and `MapEvent` consumption still await routing / navigation.
+  `.markers` / `.polylines` / `.fit` / `.destinationPreview` are all driven as of
+  M3; `.navigating` mode and `MapEvent` consumption still await navigation.
 - **[Implemented]** Destination search (§5 item 25): `PlaceSearchService` +
   `GooglePlaceSearchService` (Places SDK), `PlaceSearchViewModel`,
   `DestinationStore`, `MapSearchView`, `MapViewModel.setDestination(_:)`.
   "Places API (New)" is enabled and autocomplete is device-verified (§3);
   Place Details resolve + pin + preview camera are still device-unverified (§6).
-- **[Planned]** Map layer depth, remaining: **`RoutingService`** (route once per
-  trip — Routes API), a **separate protocol** from `MapProvider` and
-  `PlaceSearchService`, Google impl then Apple impl. Then a provider-neutral
-  guidance engine driven by `LocationStore` + the cached route. Also: turning a
-  map POI tap (`MapEvent.tappedPOI`) into a destination. (See the map-roadmap
-  investigation; not started.)
+- **[Implemented · unit-tested, device-unverified]** Routing (§5 item 26):
+  `RouteService` + `GoogleRouteService` (Routes API, REST), `Route` /
+  `GooglePolyline`, `RouteViewModel`, `RouteStatusView`,
+  `MapViewModel.setRoute(_:)`. **Routes API not yet confirmed enabled** (§9);
+  nothing has hit the live API or a screen (§6).
+- **[Planned]** Map layer depth, remaining: a provider-neutral **guidance engine**
+  (M4) driven by `LocationStore` + the cached M3 route — maneuver card, off-route
+  detection, navigation camera, vehicle heading/arrow. Also: turning a map POI tap
+  (`MapEvent.tappedPOI`) into a destination; an Apple `MKDirections` `RouteService`.
 - **[Planned]** Dock-style row of favourite/frequent destinations.
 - **[Future idea]** Weather widget (WeatherKit free tier).
 - **[Future idea]** Parking-location auto-pin on Bluetooth disconnect.
@@ -1211,7 +1346,8 @@ Roughly in order (adapts the spec §11 build order to where we are):
 6. **Music** — MusicKit catalog search + custom player.
 7. **`AppleMapProvider` + Settings toggle** — second provider, persisted choice.
 
-Map-feature sub-track (independent of the above ordering; **M1 + M2 done**):
+Map-feature sub-track (independent of the above ordering; **M1 + M2 committed,
+M3 in the working tree**):
 - **M1 [done]** — widen the rendering boundary for overlays / events / modes
   (§5 item 24).
 - **M2 [done]** — `PlaceSearchService` + Google impl, `PlaceSearchViewModel` /
@@ -1219,10 +1355,15 @@ Map-feature sub-track (independent of the above ordering; **M1 + M2 done**):
   (§5 item 25). "Places API (New)" is enabled; autocomplete + the suggestion list
   are device-verified. Still to check on device: choosing a suggestion (Place
   Details resolve), the pin, and the preview camera (§6).
-- **M3** — `RoutingService` (Routes API, once per trip) + route polyline on the
-  map via the M1 overlay channel; reuse the M2 destination.
+- **M3 [code done, unit-tested; not committed, not device-verified]** —
+  `RouteService` + `GoogleRouteService` (Routes API, once per selection),
+  `Route` / `GooglePolyline` / `RouteViewModel` / `RouteStatusView`, route
+  polyline via `MapViewModel.setRoute(_:)` through the M1 overlay channel; reuses
+  the M2 destination (§5 item 26). **Remaining: enable the Routes API (§9), then
+  verify the live request + polyline + status pill on device.**
 - **M4** — provider-neutral guidance engine (maneuver card, off-route detection,
-  navigation camera) driven by `LocationStore` + the cached route.
+  navigation camera, vehicle heading/arrow) driven by `LocationStore` + the M3
+  route.
 8. **Polish pass** — `ThemeManager`, idle-timer disable, hide iPadOS chrome,
    favourites dock, landscape-primary orientation config.
 
@@ -1272,6 +1413,26 @@ Google Cloud project:
 If Places access were ever revoked, autocomplete / details requests return an
 error and `PlaceSearchViewModel` shows its generic "Couldn't search" text.
 
+### Google Cloud — required for M3 (routing)  ⚠️ NOT yet enabled / confirmed
+
+`GoogleRouteService` calls the **Routes API**. This is a **third** Google Maps
+Platform API, separate from the Maps SDK for iOS and Places API (New). Until it's
+set up, every route request comes back HTTP 403 → `RouteError.unavailable` →
+`RouteStatusView` shows "Route unavailable".
+
+Manual console steps for the project that owns the existing Maps key:
+
+1. **Enable the "Routes API"** (APIs & Services → Library → "Routes API" → Enable).
+2. **Widen the iOS API key's "API restrictions"** to also allow **Routes API**,
+   keeping the existing `com.sakshamsharma.Dash` bundle-ID restriction. The Routes
+   API is a server-style REST call — the SDK-style iOS bundle restriction still
+   applies because `GoogleRouteService` sends the key in the `X-Goog-Api-Key`
+   header from the app; no new key or credential is needed.
+3. No Info.plist / entitlement / ATS changes — `routes.googleapis.com` is plain
+   HTTPS.
+
+Not done from code. Not verified.
+
 ### Google Maps cost discipline (spec §5)
 
 - Maps SDK map view: free/unlimited.
@@ -1280,8 +1441,12 @@ error and `PlaceSearchViewModel` shows its generic "Couldn't search" text.
   (the Google impl already does this). Comfortably free at single-user volume.
 - Places **Details (New)**: billed per field group; one call per chosen
   destination — negligible at this volume.
-- Directions/Routes (later): billed **per request** — call once per trip, never
-  on a timer; track against the cached route locally.
+- **Routes API "Compute Routes"** (M3): billed **per request**. `RouteViewModel`
+  fires exactly one request per destination selection / Retry — no timer, no
+  re-request on a new fix. `TRAFFIC_UNAWARE` + a minimal field mask
+  (`distanceMeters` / `duration` / `polyline.encodedPolyline`) keep it on the
+  cheapest SKU. ~60–90 trips/month is within the monthly free allowance.
+  Re-routing (a timer / off-route re-request) is explicitly M4+, not M3.
 
 ### Signing / distribution
 
@@ -1304,6 +1469,7 @@ Git history on `main` (newest first):
 
 | Commit | Milestone |
 |---|---|
+| *(working tree, uncommitted)* | **Map "M3": routing** (routing only — no turn-by-turn, maneuvers, navigation / ahead-of-vehicle camera, vehicle heading/arrow, auto-rerouting, voice, or dashboard work). New `Features/Map/Routing/`: SDK-neutral **`RouteService`** protocol + `Route` (`polyline` / `distanceMeters` / `Duration`) + `RouteError`; **`GoogleRouteService`** — Google **Routes API** over `URLSession` (`Foundation` only, no GMS types; `TRAFFIC_UNAWARE` DRIVE `computeRoutes`, minimal field mask), transport + key accessor injected for tests; `GooglePolyline.decode` (pure encoded-polyline decoder); `RouteViewModel` (SDK-free, holds no `LocationStore`; `state` = `idle` / `loading` / `loaded(Route)` / `noCurrentLocation` / `failed`; one request per selection or Retry, cancels in-flight, **no auto-reroute**); `RouteStatusView` (small transient `.regularMaterial` pill: spinner / "Waiting for GPS" / "Route unavailable" + Retry — **not** a nav sheet, no ETA). `MapViewModel.setRoute(_ route: Route?)` puts one `MapPolyline(id: "route", …)` on `MapContent.polylines`, and — **only in `.destinationPreview`** — re-fits the `.fit` camera **once** around vehicle + destination + route so the whole route is visible (a later fix still does not move it — not navigation camera); `.cruising` camera untouched; `setDestination(_:)` clears the stale route. `GoogleMapProvider` **unchanged** — its M1 `GMSPolyline` sync path draws the route. `GoogleMapsConfiguration.apiKey` / `.infoPlistKey` marked `nonisolated` (plain `Bundle.main` read; no behaviour change). `ContentView` wires `destination → setDestination + requestRoute`, `routeVM.state(.loaded) → setRoute`. Tests: new **`RouteTests` (28)**. Build clean, no warnings; full `DashTests` green (132). **Routes API not yet enabled in Google Cloud (§9); nothing device-verified (§6).** §5 item 26. |
 | `973ffc9` | **Map "M2": destination search** (search + destination selection only — no routing, navigation, or Apple Maps; dashboard / connection / relay untouched). Adds the **Google Places SDK** (`GooglePlaces` product, `ios-places-sdk` SPM, up-to-next-major from 11.1.0, Dash target only). New **`PlaceSearchService`** protocol — deliberately separate from `MapProvider` — with `GooglePlaceSearchService` (the only new `import GooglePlaces` file besides `GooglePlacesConfiguration`): autocomplete + Place Details (New) + one lazy `GMSAutocompleteSessionToken` per run, GMS errors mapped to `PlaceSearchError`. SDK-free: `Destination` / `PlaceSuggestion`, `DestinationStore` (source of truth for the chosen `Destination?`), `PlaceSearchViewModel` (debounce → suggestions → `resolve` → `onDestinationChosen`), custom `MapSearchView` (field + list + selected-destination chip). `MapViewModel.setDestination(_:)` drops a `MapMarker`, frames vehicle + destination via `MapCameraPlan.fit`, and toggles `.destinationPreview` ⟷ `.cruising`. `ContentView` composes map + search + store (none reference each other). `GooglePlacesConfiguration.bootstrap()` reuses the Maps key. Also in this commit: the M1 rendering-boundary widening (row below), and a follow-up `MapSearchView` styling fix — the suggestion-row secondary line + distance were invisible (`.foregroundStyle(.secondary)` / `.tertiary` wash out over `.regularMaterial`), changed to `Color(uiColor: .systemGray)`. Tests: new `PlaceSearchTests`, `MapContentTests` +M2 cases. Build clean; full `DashTests` green. **"Places API (New)" is enabled; autocomplete + the suggestion list are device-verified (§3). Place Details resolve / pin / preview camera still device-unverified (§6).** §5 item 25. |
 | `973ffc9` | **Map "M1": widen the rendering boundary** (committed together with M2, above — architecture only — no new SDKs/APIs, no search/routing/navigation/Apple Maps, no dashboard/connection changes; existing behaviour preserved). `MapProvider` goes from `makeMapView(camera:)` to `makeMapView(content: MapContent, onEvent:)` — SDK-neutral render state in, `MapEvent` out — and is kept **rendering-only** (search/routing become separate service abstractions later). New small SDK-neutral types: `MapGeometry` (`MapCoordinate`, `MapCoordinateBounds`), `MapCameraPlan` (`.follow` / `.fit`), `MapContent` (camera / vehicle / polylines / markers), `MapOverlay` (`MapPolyline`, `MapMarker`), `MapEvent` (+ `MapPOI`, `MapCameraPosition`), `MapMode`. `MapViewModel` gains `mode` / `setMode` / `handle(_:)` (no-op seam) and assembles `MapContent`. `GoogleMapProvider` becomes a `GMSMapViewDelegate` with `MapContent` diffing + keyed overlay dicts; still the only `import GoogleMaps` Map file. Fixed the two pre-existing `MapViewModel` main-actor warnings. Tests: new `MapContentTests` (10 — `MapCoordinateBounds` math + `MapViewModel` content/mode); existing `MapCameraStateTests` / `MapViewModelTests` unchanged and green. Build clean; full `DashTests` green (82). §5 item 24. |
 | `c3a3a18` | **physical-device discovery fix + connection UX refinement.** Discovery fix: `LocationReceiver`'s `NWBrowser` now uses `.bonjourWithTXTRecord(type:domain:)` instead of PTR-only `.bonjour(...)` — on device the plain descriptor delivered every result with `metadata == .none`, so the identity TXT never reached Dash (first-time pair now works iPhone↔iPad over Personal Hotspot). Testable seam `LocationReceiver.txtEntries(from:)` + `LocationReceiverTests` (7, incl. nil-metadata). UX (§5 decision 23): "Disconnect" while searching → **"Stop Searching"**; new `ConnectedControlView` overlay gives **Disconnect / Forget `<name>`** while connected (attached in `RootView`, not `ContentView`); DashRelay `.waiting` gains **"Stop Sharing"**; `pairAndConnect(to:named:)` stores a user-typed friendly name (**stable `id` untouched**) from a "Name this iPhone" alert, surfaced via `pairedRelayDisplayName`. (The temporary `[DISCOVERY-DIAG]` `os.Logger` lines used during this hardware debugging were removed before commit — none are in the source.) Tests: `ConnectionCoordinatorTests`, `ConnectionSetupViewTests`, new `ConnectedControlViewTests`, `RelayStatusViewTests`. All green. |
@@ -1359,3 +1525,10 @@ Git history on `main` (newest first):
   bug in the row styling was found and fixed — §3, §6). Not yet run on device:
   choosing a suggestion (Place Details resolve), the destination pin, and the
   `.destinationPreview` camera.
+- **Map M3 — automated only, nothing device-verified.** 28 unit tests cover the
+  `Route` model, polyline decode, request/response mapping (canned data), a
+  mocked-`URLSession` `GoogleRouteService`, `RouteViewModel` state, and
+  `MapViewModel.setRoute` including the `.destinationPreview` camera re-fit. The
+  **live Routes API has never been called** (and is not enabled — §9), and the
+  route polyline / preview re-fit / `RouteStatusView` / Retry have not been seen
+  on a screen.
