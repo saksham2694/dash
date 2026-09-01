@@ -15,7 +15,7 @@ struct DashRelayApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RelayStatusScreen()
                 .environmentObject(session)
                 .task { session.start() }
         }
