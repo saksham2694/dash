@@ -3,7 +3,8 @@
 //  DashRelay
 //
 //  The first connection/status screen for DashRelay. It shows whether the relay
-//  is stopped, waiting for a Dash iPad, or connected — and offers Start / Disconnect.
+//  is stopped, waiting for a Dash iPad, or connected — and offers Start / Stop
+//  Sharing / Disconnect.
 //
 //  `RelaySessionController` is the single source of truth. `RelayStatusScreen` is
 //  the container that reads it from the environment; `RelayStatusView` is
@@ -24,7 +25,7 @@ struct RelayStatusScreen: View {
         RelayStatusView(
             state: session.state,
             onStart: { session.start() },
-            onDisconnect: { session.stop() }
+            onStop: { session.stop() }
         )
     }
 }
@@ -37,8 +38,9 @@ struct RelayStatusView: View {
     /// Begin advertising + sharing location (recover from a stopped state).
     let onStart: () -> Void
 
-    /// Deliberate disconnect — stops networking and GPS via the session layer.
-    let onDisconnect: () -> Void
+    /// Stop the session — ends advertising and GPS via the session layer. Used
+    /// for both "Stop Sharing" (while waiting) and "Disconnect" (while connected).
+    let onStop: () -> Void
 
     var body: some View {
         let display = Display(state)
@@ -85,8 +87,11 @@ struct RelayStatusView: View {
         case .start:
             Button("Start", action: onStart)
                 .buttonStyle(.borderedProminent)
+        case .stopSharing:
+            Button("Stop Sharing", action: onStop)
+                .buttonStyle(.bordered)
         case .disconnect:
-            Button("Disconnect", action: onDisconnect)
+            Button("Disconnect", action: onStop)
                 .buttonStyle(.bordered)
                 .tint(.red)
         case .none:
@@ -104,9 +109,11 @@ extension RelayStatusView {
         enum Action: Equatable {
             /// Offer to start the relay (we are stopped).
             case start
+            /// Offer to stop advertising while no iPad has connected yet.
+            case stopSharing
             /// Offer to disconnect (a dashboard is connected).
             case disconnect
-            /// No action (waiting — it will connect on its own).
+            /// No action.
             case none
         }
 
@@ -118,9 +125,10 @@ extension RelayStatusView {
 
         var tint: Color {
             switch action {
-            case .disconnect: .green   // connected
-            case .start: .secondary    // stopped
-            case .none: .accentColor   // waiting
+            case .disconnect: .green    // connected
+            case .start: .secondary     // stopped
+            case .stopSharing: .accentColor  // waiting
+            case .none: .accentColor
             }
         }
 
@@ -135,9 +143,9 @@ extension RelayStatusView {
             case .waiting:
                 symbolName = "antenna.radiowaves.left.and.right"
                 title = "Ready to Connect"
-                message = "DashRelay is sharing your iPhone’s location on this Wi‑Fi network. Open Dash on your iPad to connect — keep this app open."
+                message = "DashRelay is sharing your iPhone’s location on this Wi‑Fi network. Open Dash on your iPad to connect — or tap Stop Sharing if you’re done."
                 showsActivity = true
-                action = .none
+                action = .stopSharing
             case .connected:
                 symbolName = "checkmark.circle.fill"
                 title = "Connected"
@@ -150,13 +158,13 @@ extension RelayStatusView {
 }
 
 #Preview("Stopped") {
-    RelayStatusView(state: .stopped, onStart: {}, onDisconnect: {})
+    RelayStatusView(state: .stopped, onStart: {}, onStop: {})
 }
 
 #Preview("Waiting") {
-    RelayStatusView(state: .waiting, onStart: {}, onDisconnect: {})
+    RelayStatusView(state: .waiting, onStart: {}, onStop: {})
 }
 
 #Preview("Connected") {
-    RelayStatusView(state: .connected, onStart: {}, onDisconnect: {})
+    RelayStatusView(state: .connected, onStart: {}, onStop: {})
 }

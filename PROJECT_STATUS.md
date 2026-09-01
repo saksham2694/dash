@@ -6,10 +6,22 @@ without conversation history.
 
 - **Last updated:** 2026-09-01
 - **Branch:** `main`
-- **Latest commit:** `9ccf6e0 feat(connection): add setup screen`
-- **Working tree (not yet committed as of this update):** the **first DashRelay
-  connection/status UI** (`RelayStatusScreen` / `RelayStatusView` — §3 "DashRelay",
-  §5 item 18).
+- **Latest commit:** `9ccf6e0 feat(connection): add setup screen` (the DashRelay
+  status UI and this pairing work are in the working tree, not yet committed)
+- **Working tree (not yet committed as of this update):**
+  1. the **first DashRelay connection/status UI** (`RelayStatusScreen` /
+     `RelayStatusView` — §3 "DashRelay", §5 item 18);
+  2. the **first real pairing flow** between Dash and DashRelay — a stable relay
+     identity in the Bonjour TXT record, discover-then-pick for first-time setup,
+     auto-prefer the paired relay on later launches, and a Forget capability
+     (§3, §5 items 19–22, §10);
+  3. the **physical-device discovery fix** (`NWBrowser` →
+     `.bonjourWithTXTRecord`) — first-time pairing now confirmed working
+     iPhone↔iPad on hardware — plus temporary `[DISCOVERY-DIAG]` logging still to
+     be removed (§3 "End-to-end", §10);
+  4. a **connection UX refinement** — "Stop Searching", a disconnect/forget
+     control on the dashboard while connected, DashRelay "Stop Sharing", and a
+     friendly name captured at pairing (§5 item 23, §10).
 - **Authoritative requirements:** `PROJECT_SPEC.pdf` (repo root) — "iPad CarPlay-style Dashboard — Project Spec"
 - **Day-to-day guidance:** `CLAUDE.md` (repo root)
 
@@ -63,10 +75,12 @@ dash/
 ├── DashShared/                      # local Swift package (swift-tools 6.3, Swift 6 mode)
 │   ├── Package.swift
 │   ├── Sources/DashShared/
-│   │   ├── LocationPacket.swift     # Codable wire model: latitude, longitude, speed, heading, timestamp
-│   │   └── LocationWireFormat.swift # bonjourServiceType "_dashrelay._tcp", ISO-8601 JSON coder, \n framing
+│   │   ├── LocationPacket.swift       # Codable wire model: latitude, longitude, speed, heading, timestamp
+│   │   ├── LocationWireFormat.swift   # bonjourServiceType "_dashrelay._tcp", ISO-8601 JSON coder, \n framing
+│   │   └── RelayAdvertisement.swift   # TXT-record contract: stable relay `id` + `displayName` (pairing identity)
 │   └── Tests/DashSharedTests/
-│       └── LocationPacketTests.swift
+│       ├── LocationPacketTests.swift
+│       └── RelayAdvertisementTests.swift
 └── Dash/
     ├── Dash.xcodeproj               # one project, 6 targets: Dash, DashTests, DashUITests,
     │                                #   DashRelay, DashRelayTests, DashRelayUITests
@@ -75,21 +89,23 @@ dash/
     │   └── GoogleMapsService.xcconfig.template # committed template
     ├── Dash/                        # iPad app target
     │   ├── DashApp.swift            # @main; owns LocationStore + ConnectionCoordinator + KnownDeviceStore; bootstraps Google Maps
-    │   ├── RootView.swift           # connection gate: ContentView when isConnected, else ConnectionSetupView
+    │   ├── RootView.swift           # connection gate: ContentView (+ ConnectedControlView overlay) when isConnected, else ConnectionSetupView
     │   ├── ContentView.swift        # full-screen DashMapView (the "dashboard" behind the gate for now — placeholder shell)
     │   ├── Info.plist               # NSBonjourServices, GoogleMapsAPIKey = $(GOOGLE_MAPS_API_KEY)
     │   ├── Configuration/
     │   │   └── GoogleMapsConfiguration.swift   # reads key from Info.plist, calls GMSServices.provideAPIKey
     │   ├── Core/
-    │   │   ├── LocationReceiver.swift          # NWBrowser + NWConnection, reconnect loop; Status now carries connectedServiceName
-    │   │   ├── LocationReceiving.swift         # protocol seam over LocationReceiver (DI for ConnectionCoordinator tests)
+    │   │   ├── LocationReceiver.swift          # NWBrowser + NWConnection; reads relay identity from the TXT record; targets ONE relay, reconnects only to it
+    │   │   ├── LocationReceiving.swift         # protocol seam: start()/stop()/setTargetRelay(id:) + onDiscoveryChange (DI for ConnectionCoordinator tests)
+    │   │   ├── DiscoveredRelay.swift           # transient discovery result: stable id + displayName (distinct from KnownRelay)
     │   │   ├── PacketLineBuffer.swift          # reassembles \n-delimited JSON → [LocationPacket]
     │   │   ├── LocationStore.swift             # single source of truth for location DATA + watchdog (no longer owns the transport)
     │   │   ├── ConnectionState.swift           # enum: disconnected / discovering / connecting / connected
-    │   │   ├── ConnectionCoordinator.swift     # session layer: owns the transport, maps phase→ConnectionState, feeds LocationStore
-    │   │   └── KnownDeviceStore.swift          # pairing / known-device persistence (KnownRelay); separate from connection
+    │   │   ├── ConnectionCoordinator.swift     # session layer: owns the transport, bridges pairing→connection (prefer paired, ignore strangers), feeds LocationStore
+    │   │   └── KnownDeviceStore.swift          # pairing / known-device persistence (KnownRelay, keyed by stable relay id); pairedRelay convenience
     │   ├── Features/Connection/
-    │   │   └── ConnectionSetupView.swift       # the not-connected / setup screen (presentational; own feature folder)
+    │   │   ├── ConnectionSetupView.swift       # not-connected / setup screen: device picker + "name this iPhone" prompt, "looking for <paired>", "Stop Searching", Forget <name> (presentational)
+    │   │   └── ConnectedControlView.swift      # compact overlay shown on the dashboard while connected: names the iPhone, offers Disconnect / Forget (presentational)
     │   └── Features/Map/
     │       ├── MapProvider.swift               # protocol boundary + MapProviderID enum
     │       ├── MapCameraState.swift            # SDK-neutral camera value type + following(_:)
@@ -102,8 +118,9 @@ dash/
     │   ├── LocationReceiverTests.swift
     │   ├── PacketLineBufferTests.swift
     │   ├── LocationStoreTests.swift
-    │   ├── ConnectionCoordinatorTests.swift
-    │   ├── ConnectionSetupViewTests.swift
+    │   ├── ConnectionCoordinatorTests.swift   # first-time pairing, prefer-paired, ignore-stranger, Disconnect vs Forget, friendly-name-at-pairing
+    │   ├── ConnectionSetupViewTests.swift     # device-list / "looking for paired" / "Stop Searching" / Forget-<name> mapping
+    │   ├── ConnectedControlViewTests.swift    # device-label fallback for the connected overlay
     │   ├── KnownDeviceStoreTests.swift
     │   ├── MapCameraStateTests.swift
     │   └── DashTests.swift          # scaffold `example()` — no-op, still present
@@ -112,14 +129,16 @@ dash/
         ├── DashRelayApp.swift       # @main; owns RelaySessionController (@StateObject), renders RelayStatusScreen, starts session in .task
         ├── Info.plist               # UIBackgroundModes:[location], NSLocalNetworkUsageDescription, NSBonjourServices
         ├── Features/Status/
-        │   └── RelayStatusView.swift       # RelayStatusScreen (container) + RelayStatusView (presentational) + Display mapping
+        │   └── RelayStatusView.swift       # RelayStatusScreen (container) + RelayStatusView (presentational): Start / Stop Sharing (waiting) / Disconnect (connected)
         ├── Services/
         │   ├── LocationTracker.swift       # wraps CLLocationManager; wantsTracking gate so auth callbacks can't revive GPS after stop()
-        │   ├── LocationBroadcaster.swift   # NWListener advertised via Bonjour, \n-delimited JSON to N clients
+        │   ├── LocationBroadcaster.swift   # NWListener advertised via Bonjour WITH a TXT record (relay id + name), \n-delimited JSON to N clients
+        │   ├── RelayIdentity.swift         # persists a per-install UUID; builds the RelayAdvertisement (stable id + UIDevice.current.name)
         │   └── RelaySession.swift          # session layer: RelaySessionController (stopped/waiting/connected) + RelayTracking/RelayBroadcasting seams
         └── DashRelayTests/
             ├── LocationTrackerTests.swift
-            ├── LocationBroadcasterTests.swift
+            ├── LocationBroadcasterTests.swift   # now also: advertises identity, service-name fallback
+            ├── RelayIdentityTests.swift
             ├── RelaySessionControllerTests.swift
             └── RelayStatusViewTests.swift
 ```
@@ -134,24 +153,31 @@ linked into `Dash`, `DashTests`, `DashRelay`, and `DashRelayTests`.
 ```
 iPhone — DashRelay                              iPad — Dash
 ────────────────────                            ──────────────────
-RelaySessionController (stopped/waiting/         ConnectionCoordinator (disconnected/discovering/
-  connected); start() → advertise + track,         connecting/connected); startSession()/disconnect()
-  stop() → stop networking AND GPS                    │ owns the transport lifecycle
-     │                                                ▼
-CLLocationManager                                LocationReceiver (NWBrowser "_dashrelay._tcp"
-  → LocationTracker.packet(from:)                  → NWConnection → receive loop)
-  → onPacket (in didUpdateLocations)              → PacketLineBuffer.append(_:)  (split on \n, decode)
-  → LocationBroadcaster.broadcast(_:)             → onPacket → ConnectionCoordinator
-  → NWListener → all TCP clients ───JSON+\n──────▶ → LocationStore.ingest(_:)   ← SINGLE SOURCE OF TRUTH (location DATA)
-                                                     ├─ @Published latestPacket / signal
-                                                     └─ watchdog Task: no packet in staleInterval ⇒ signal = .stale
-                                                            │
-                                                  RootView: ContentView when
-                                                  ConnectionCoordinator.isConnected, else ConnectionSetupView
-                                                     → ContentView (observes LocationStore)
-                                                     → DashMapView(viewModel:, location: latestPacket)
-                                                     → MapViewModel.update(with:) → camera.following(packet)
-                                                     → GoogleMapProvider → GMSMapView.animate(to:) + move marker
+RelayIdentity.load() → RelayAdvertisement        KnownDeviceStore  (persisted [KnownRelay],
+  (persisted UUID + UIDevice name)                 keyed by stable relay id)   ← PAIRING
+     │ TXT record                                       │  pairedRelay
+     ▼                                                  ▼
+RelaySessionController (stopped/waiting/          ConnectionCoordinator (disconnected/discovering/
+  connected); start() → advertise + track,         connecting/connected); startSession() /
+  stop() → stop networking AND GPS                  pairAndConnect(to:) / disconnect() / forgetPairedRelay()
+     │                                                  │ owns the transport; picks the target relay
+     ▼                                                  ▼
+CLLocationManager                                LocationReceiver (NWBrowser "_dashrelay._tcp";
+  → LocationTracker.packet(from:)                   reads RelayAdvertisement from each result's TXT record;
+  → onPacket (in didUpdateLocations)               onDiscoveryChange → [DiscoveredRelay];
+  → LocationBroadcaster.broadcast(_:)              setTargetRelay(id:) → connect to ONE relay,
+  → NWListener + Bonjour Service                    reconnect only to it, never to a stranger)
+     (name + TXT: rid, name) ───JSON+\n──────────▶ → PacketLineBuffer → onPacket → ConnectionCoordinator
+                                                     → LocationStore.ingest(_:)  ← SINGLE SOURCE OF TRUTH (location DATA)
+                                                        ├─ @Published latestPacket / signal
+                                                        └─ watchdog Task: no packet in staleInterval ⇒ signal = .stale
+                                                               │
+                                                     RootView: ContentView (+ ConnectedControlView overlay:
+                                                     name / Disconnect / Forget) when isConnected,
+                                                     else ConnectionSetupView(model:) — device picker +
+                                                     "name this iPhone" prompt / "Looking for <paired>…" /
+                                                     "Stop Searching" / "Forget <name>"
+                                                        → ContentView → DashMapView → MapViewModel → GoogleMapProvider
 ```
 
 Connection state (`disconnected/discovering/connecting/connected`) lives **only**
@@ -160,13 +186,21 @@ owns location *data* and the data-freshness watchdog, which is a separate concer
 (you can be `.connected` but `signal == .stale` if the relay is up but has no GPS
 fix).
 
+**Pairing vs connection stay separate concerns.** *Pairing* is a persisted
+relationship (`KnownDeviceStore`, keyed by a relay's stable id). *Connection* is
+the transient live session (`ConnectionCoordinator` + `LocationReceiver`). The
+coordinator now *reads* `KnownDeviceStore` to decide which relay to target and
+*writes* to it on an explicit pair / forget — but persistence logic stays in the
+store and transport logic stays in the receiver.
+
 ### Key architectural rules currently honoured
 
 - **`LocationStore` is the only consumer of network data.** `LocationReceiver`
   pushes into it; features read from it. Nothing else opens a connection.
-- **Wire types live in `DashShared`.** `LocationPacket` and `LocationWireFormat`
-  (service type + JSON/date strategy + `\n` framing) are defined once. `DashRelay`
-  and `Dash` both go through `LocationWireFormat`.
+- **Wire types live in `DashShared`.** `LocationPacket`, `LocationWireFormat`
+  (service type + JSON/date strategy + `\n` framing) and now `RelayAdvertisement`
+  (the Bonjour TXT-record contract: `rid` + `name`) are defined once. `DashRelay`
+  and `Dash` both go through them.
 - **The map is isolated behind `MapProvider`.** `import GoogleMaps` appears in
   exactly two files: `GoogleMapProvider.swift` and `GoogleMapsConfiguration.swift`.
   `MapProvider` / `MapCameraState` / `MapViewModel` / `DashMapView` are SDK-free.
@@ -174,8 +208,14 @@ fix).
   reference, no networking, no GPS — it converts a `LocationPacket` into a
   `MapCameraState` via the pure `MapCameraState.following(_:)`.
 - **Bonjour discovery, never a hardcoded IP** — on both sides.
-- **Incidental disconnects are routine.** `LocationReceiver` re-browses and
-  reconnects on a timer; `LocationStore`'s watchdog covers the UI gap. A
+- **The receiver connects to ONE identified relay, not "results.first".**
+  `LocationReceiver` browses continuously, reports every visible relay via
+  `onDiscoveryChange`, and only opens a connection once `ConnectionCoordinator`
+  names a target with `setTargetRelay(id:)`. After an incidental drop it
+  re-browses and reconnects **only to that same relay id** — a different relay
+  appearing nearby is never picked up silently.
+- **Incidental disconnects are routine.** The receiver re-browses and reconnects
+  to the target on a timer; `LocationStore`'s watchdog covers the UI gap. A
   **deliberate** disconnect is different — it stays disconnected (see below).
 - **SwiftUI + MVVM**, `@MainActor` isolation, serial-queue-confined
   `@unchecked Sendable` classes for the Network-framework wrappers.
@@ -189,9 +229,9 @@ not replace their responsibilities.
 
 | Concern | Type | Owns |
 |---|---|---|
-| Current connection state + session lifecycle (iPad) | `ConnectionCoordinator` (`@MainActor ObservableObject`) | the `LocationReceiving` transport; `@Published connectionState` / `connectedDeviceName`; `startSession()` / `disconnect()` |
+| Current connection state + session lifecycle (iPad) | `ConnectionCoordinator` (`@MainActor ObservableObject`) | the `LocationReceiving` transport; `@Published connectionState` / `connectedRelayID` / `connectedDisplayName` / `discoveredRelays`; derived `pairedRelayName` / `pairedRelayDisplayName` / `offerableRelays`; `startSession()` / `pairAndConnect(to:named:)` / `disconnect()` / `forgetPairedRelay()` |
 | Current session state (iPhone) | `RelaySessionController` (`@MainActor ObservableObject`) | `LocationTracker` + `LocationBroadcaster`; `@Published state` (`stopped`/`waiting`/`connected`) / `isTrackingLocation`; `start()` / `stop()` |
-| Pairing / known devices (iPad) | `KnownDeviceStore` (`@MainActor ObservableObject`) | a persisted `[KnownRelay]` with `remember` / `forget` / `forgetAll` |
+| Pairing / known devices (iPad) | `KnownDeviceStore` (`@MainActor ObservableObject`) | a persisted `[KnownRelay]` (keyed by stable relay id) with `remember` / `forget` / `forgetAll` / `pairedRelay` |
 
 - **`ConnectionCoordinator` owns the transport lifecycle**, not `LocationStore`.
   It translates `LocationReceiver.Status.Phase` → `ConnectionState`
@@ -216,18 +256,49 @@ not replace their responsibilities.
   when `ConnectionCoordinator.isConnected`; otherwise `ConnectionSetupView`. The
   map is never shown without an active connection. `RootView` is the only place
   that reads connection state for gating; `ContentView` and feature views never
-  see it. `ConnectionSetupView` is presentational — it takes a `ConnectionState`
-  and action closures, so it holds no copy of the state.
+  see it. Both connection views are presentational and hold no copy of the
+  connection/pairing state:
+  - `ConnectionSetupView` takes `ConnectionSetupView.Model` (state +
+    `offerableRelays` + `pairedRelayName`) and closures (`onPair`, `onForget`,
+    `onStopSearching`, `onSearch`). Its one bit of local state is the "name this
+    iPhone" alert (presentation only).
+  - `ConnectedControlView` (overlaid on `ContentView` by `RootView` while
+    connected) takes the paired device name + `onDisconnect` / `onForget`
+    closures. Its one bit of local state is the confirmation dialog.
+- **Pairing flow (iPad).** First launch: browse → if ≥1 relay is visible and
+  nothing is paired, `ConnectionSetupView` lists them; the user taps one, is
+  prompted to **name** it, and confirms → `ConnectionCoordinator.pairAndConnect(to:named:)`
+  → `KnownDeviceStore.remember(KnownRelay(id:, displayName: <friendly name>))`
+  **and** `receiver.setTargetRelay(id:)`. The friendly name is display-only;
+  blank falls back to the advertised name; the stable `id` is never touched by
+  it. Later launches: `startSession()` targets the paired relay immediately; if
+  it isn't visible the screen says "Looking for <name>…" and never offers a
+  nearby stranger. `forgetPairedRelay()` removes the `KnownRelay`, clears the
+  transport target (dropping the session if it was to that relay), and returns
+  to first-time browsing.
+- **Disconnect vs Forget, reachable from both apps.** On the iPad,
+  `ConnectionSetupView` offers **"Stop Searching"** (deliberate, sticky — via
+  `disconnect()`) while browsing/connecting, and `ConnectedControlView` offers
+  **Disconnect** (ends the session, keeps the pairing) and **Forget <name>**
+  (drops the pairing) while connected. On the iPhone, `RelayStatusView` offers
+  **"Stop Sharing"** while `.waiting` and **Disconnect** while `.connected` —
+  both call `RelaySessionController.stop()`, so the relay never has to be left
+  advertising indefinitely.
 - **DashRelay shows its session state.** `RelayStatusScreen` (the DashRelay root)
-  reads `RelaySessionController` from the environment and hands `state` +
-  action closures to the presentational `RelayStatusView`
-  (`stopped` → Start, `waiting` → "Ready to Connect" + spinner, `connected` →
-  Disconnect). Disconnect calls the existing `RelaySessionController.stop()`; the
-  view contains no networking or GPS logic and keeps no copy of the state.
-- **Pairing state is independent.** `KnownDeviceStore` and `ConnectionCoordinator`
-  hold no reference to each other. `KnownRelay` is keyed by Bonjour service name
-  (spec §4) and the store already supports multiple devices. The hook that links
-  them later is `ConnectionCoordinator.connectedDeviceName`.
+  reads `RelaySessionController` from the environment and hands `state` + an
+  `onStart` / `onStop` pair to the presentational `RelayStatusView`
+  (`stopped` → Start, `waiting` → "Ready to Connect" + spinner + **"Stop
+  Sharing"**, `connected` → **Disconnect**). "Stop Sharing" and "Disconnect"
+  both call `RelaySessionController.stop()`; the view contains no networking or
+  GPS logic and keeps no copy of the state.
+- **Pairing state is a distinct concern, but now bridged.** `KnownDeviceStore` is
+  still storage-only (no networking). `ConnectionCoordinator` now holds a
+  reference to it (`any KnownDeviceStoring`, injected) so it can prefer the paired
+  relay and persist an explicit pair/forget — superseding the earlier "hold no
+  reference to each other" arrangement (see §5 decision 15). `KnownRelay` is keyed
+  by the relay's **stable id** from the TXT record (not the Bonjour service name);
+  the store still supports multiple devices, with `pairedRelay` = the first for
+  now.
 
 ---
 
@@ -241,8 +312,13 @@ not replace their responsibilities.
 - **[Implemented]** `LocationWireFormat` — shared `bonjourServiceType`
   (`"_dashrelay._tcp"`), `makeEncoder()`/`makeDecoder()` (ISO-8601 dates),
   `lineDelimiter` (`\n`), `encodeLine(_:)`.
-- **[Verified · automated]** `LocationPacketTests` (4 tests): JSON round-trip,
-  invalid-fix sentinels survive, decoding a fixed payload, exact key set.
+- **[Implemented]** `RelayAdvertisement` — the Bonjour TXT-record contract for
+  pairing: `id` (stable relay identity, key `rid`) + `displayName` (key `name`).
+  `txtRecordEntries` for the relay to publish; `init?(txtRecordEntries:)` for the
+  dashboard to read back (returns `nil` without a non-empty `id`).
+- **[Verified · automated]** `LocationPacketTests` (4) + `RelayAdvertisementTests`
+  (4): JSON round-trip, invalid-fix sentinels survive, fixed payload, exact key
+  set; TXT round-trip, exact keys, missing/empty `id` rejected, missing name → "".
 
 ### DashRelay (iPhone)
 
@@ -256,9 +332,17 @@ not replace their responsibilities.
   after a deliberate stop; a `denied`/`restricted` change stops delivery without
   clearing intent, so re-granting permission resumes.
 - **[Implemented]** `LocationBroadcaster` — `NWListener` advertised as a Bonjour
-  `_dashrelay._tcp` service; accepts multiple concurrent TCP clients; sends each
-  packet as one `\n`-terminated JSON line; clean connect/disconnect handling; a
-  main-actor `onStatusChange` hook (`isListening`, `clientCount`).
+  `_dashrelay._tcp` service **with a TXT record** carrying this relay's
+  `RelayAdvertisement` (`rid` + `name`), so the iPad can pair with *this* iPhone
+  specifically. Accepts multiple concurrent TCP clients; sends each packet as one
+  `\n`-terminated JSON line; clean connect/disconnect handling; a main-actor
+  `onStatusChange` hook (`isListening`, `clientCount`). The Bonjour instance name
+  is the device name (or `"DashRelay"` when empty) — user-facing, not the pairing
+  key.
+- **[Implemented]** `RelayIdentity` — mints a random UUID on first use, persists
+  it in `UserDefaults`, and returns a `RelayAdvertisement` pairing it with
+  `UIDevice.current.name`. The identity lives for the life of the install; a
+  rename keeps it, a reinstall replaces it (re-pair once).
 - **[Implemented]** `RelaySessionController` — the iPhone session layer. Owns
   `LocationTracker` + `LocationBroadcaster` behind `RelayTracking` /
   `RelayBroadcasting` seams; wires each fix straight through;
@@ -269,16 +353,17 @@ not replace their responsibilities.
 - **[Implemented]** `DashRelayApp` owns `RelaySessionController` as `@StateObject`,
   renders `RelayStatusScreen`, and calls `session.start()` in `.task` at launch.
 - **[Implemented]** `RelayStatusScreen` / `RelayStatusView` (`Features/Status/`) —
-  the first DashRelay connection/status UI. `RelayStatusScreen` is the container
+  the DashRelay connection/status UI. `RelayStatusScreen` is the container
   that reads `RelaySessionController` (single source of truth) from the
   environment; `RelayStatusView` is presentational — it takes the `State` plus
-  `onStart` / `onDisconnect` closures and holds no copy of the state. Screens:
-  a **startup/waiting screen** when not connected (`stopped` → "Relay Stopped" +
-  a **Start** button that calls `session.start()`; `waiting` → "Ready to Connect"
-  + spinner + a note that a Dash iPad on the same Wi‑Fi should be opened, no
-  button) and a **connected screen** (`connected` → "Connected" + a **Disconnect**
-  button that calls the existing `RelaySessionController.stop()`, which returns
-  the session to `.stopped`/waiting). The connected screen shows a **generic
+  an `onStart` / `onStop` pair and holds no copy of the state. Screens:
+  a **startup screen** (`stopped` → "Relay Stopped" + a **Start** button that
+  calls `session.start()`); a **waiting screen** (`waiting` → "Ready to Connect"
+  + spinner + a **"Stop Sharing"** button so the relay isn't left advertising
+  forever); and a **connected screen** (`connected` → "Connected" + a
+  **Disconnect** button). "Stop Sharing" and "Disconnect" both call
+  `RelaySessionController.stop()` (→ `.stopped`). The connected screen shows a
+  **generic
   message** — it does **not** display the connected Dash device's name, because
   `RelaySessionController` does not expose a client name yet (`LocationBroadcaster`
   only reports `clientCount`). A nested `RelayStatusView.Display` value type does
@@ -293,37 +378,45 @@ not replace their responsibilities.
 - **[Verified · automated]** `LocationTrackerTests` (7): field mapping, speed
   stays raw m/s, negative speed/course preserved, JSON round-trip, manager
   configuration, initial state.
-- **[Verified · automated]** `LocationBroadcasterTests` (5): service type,
+- **[Verified · automated]** `LocationBroadcasterTests` (7): service type,
   single-`\n` framing, line decodes back, multi-line stream splits, lifecycle
-  no-ops.
+  no-ops, **advertises the relay identity**, **service-name falls back to
+  `"DashRelay"` when the device name is empty**.
+- **[Verified · automated]** `RelayIdentityTests` (4): mints an id on first use
+  and reuses it, distinct id per install (per store), device name flows through
+  as the display name, **a rename keeps the same identity**.
 - **[Verified · automated]** `RelaySessionControllerTests` (8): `stopped→waiting`
   on `start()` (advertising + GPS begin), `waiting→connected` when a client
   attaches and back, `connected→stopped` on `stop()` (broadcaster + tracker
   stopped), **stopping the session stops tracking**, **a deliberate disconnect
   does not immediately reconnect** (trailing status ignored), resume after stop,
   fixes forwarded to the broadcaster.
-- **[Verified · automated]** `RelayStatusViewTests` (5): the `Display` `State` →
+- **[Verified · automated]** `RelayStatusViewTests` (6): the `Display` `State` →
   screen mapping — `stopped` offers *Start* with no activity indicator; `waiting`
-  shows the activity indicator, offers no action ("Ready to Connect"); `connected`
+  shows the activity indicator and offers **"Stop Sharing"**; `connected`
   offers *Disconnect* with no activity indicator; every state has non-empty
   title/message/symbol; **Disconnect is offered only when connected**.
-- **[Verified · simulator]** `RelayStatusView` rendered on the iPhone simulator in
-  the `waiting` state (portrait and landscape): antenna symbol, "Ready to
-  Connect", spinner, explanatory text, no button; content stays centred and
-  width-capped. `stopped` / `connected` are covered by the unit tests, not this
-  manual check.
+- **[Verified · simulator]** `RelayStatusView` was rendered on the iPhone
+  simulator in the `waiting` state (portrait and landscape): antenna symbol,
+  "Ready to Connect", spinner, explanatory text; content stays centred and
+  width-capped. **This predates the "Stop Sharing" button** — that button and
+  the updated wording have not been re-rendered on a real screen this round
+  (covered by the `Display` unit tests).
 - **[Implemented]** DashRelay app builds and launches; the root is now
   `RelayStatusScreen`.
 
 ### Dash (iPad)
 
-- **[Implemented]** `LocationReceiver` — `NWBrowser` for `_dashrelay._tcp`,
-  connects to the first discovered endpoint, receive loop feeding
-  `PacketLineBuffer`; automatic re-browse/reconnect after a delay on any
-  *incidental* drop/failure (suppressed after a deliberate `stop()`); `Status`
-  phases `stopped / browsing / connecting / connected` plus
-  `connectedServiceName` (the Bonjour name of the relay reached, for pairing)
-  via a main-actor `onStatusChange`. Conforms to `LocationReceiving`.
+- **[Implemented]** `LocationReceiver` — `NWBrowser` for `_dashrelay._tcp`. Reads
+  each result's TXT record into a `RelayAdvertisement` and reports the visible set
+  via `onDiscoveryChange → [DiscoveredRelay]`. **Connects only to the relay named
+  by `setTargetRelay(id:)`** — never "results.first" — and after an *incidental*
+  drop re-browses and reconnects **only to that same id** (suppressed after a
+  deliberate `stop()`, which also clears the target). `Status` phases
+  `stopped / browsing / connecting / connected` plus `connectedRelayID` /
+  `connectedDisplayName` via a main-actor `onStatusChange`. Conforms to
+  `LocationReceiving`. *(Bonjour/TCP internals remain device-validated, not unit
+  tested — see below.)*
 - **[Implemented]** `PacketLineBuffer` — reassembles the TCP byte stream, splits
   on `\n`, decodes each line, keeps partial trailing lines, skips blank/malformed
   lines, drops the buffer if an unterminated line exceeds 64 KB.
@@ -335,36 +428,62 @@ not replace their responsibilities.
   last packet; `refreshSignal(now:)` for deterministic tests; `connectionEnded()`
   returns to `.waiting` when the session stops. **No longer owns the transport or
   a link phase** — that moved to `ConnectionCoordinator`.
-- **[Implemented]** `ConnectionCoordinator` — the iPad session layer. Owns a
-  `LocationReceiving`; `@Published connectionState` (`disconnected` /
-  `discovering` / `connecting` / `connected`) and `connectedDeviceName`;
-  `isConnected`; `startSession()` / `disconnect()`; feeds packets into
-  `LocationStore`; a deliberate `disconnect()` stays disconnected and ignores
-  trailing transport status. Pure `connectionState(for:)` phase mapping.
+- **[Implemented]** `ConnectionCoordinator` — the iPad session + pairing-bridge
+  layer. Owns a `LocationReceiving` and a `KnownDeviceStoring`; `@Published`
+  `connectionState` (`disconnected` / `discovering` / `connecting` / `connected`),
+  `connectedRelayID`, `connectedDisplayName`, `discoveredRelays`; computed
+  `offerableRelays` (empty once paired) and `pairedRelayName`. Actions:
+  `startSession()` (browse + target the paired relay), `pairAndConnect(to:)`
+  (remember + target — first-time pick), `disconnect()` (deliberate, sticky,
+  keeps pairing), `forgetPairedRelay()` (remove the `KnownRelay`, clear the
+  target, drop the session if it was to that relay, resume browsing). Auto-connect
+  fires **only** when exactly one *known* relay is visible; a stranger is never
+  targeted. Pure `connectionState(for:)` phase mapping.
 - **[Implemented]** `KnownDeviceStore` — `@MainActor ObservableObject` +
-  `KnownDeviceStoring`; a `[KnownRelay]` (keyed by Bonjour service name)
-  persisted as JSON in `UserDefaults`; `remember` / `forget` / `forgetAll` /
-  `isKnown`; supports multiple devices. **This is storage only** — nothing
-  decides *when* to remember a device yet.
-- **[Implemented]** `RootView` — gates the UI: `ContentView` (dashboard) when
-  `ConnectionCoordinator.isConnected`, otherwise `ConnectionSetupView`. Wires the
-  setup screen's actions to `connection.disconnect()` / `connection.startSession()`.
-- **[Implemented]** `ConnectionSetupView` (`Features/Connection/`) — the first
-  connection/setup screen, shown whenever Dash is not connected. Presentational:
-  takes a `ConnectionState` + `onDisconnect` / `onReconnect` closures (no state
-  copy). Communicates *not connected*, whether it is *discovering / connecting*
-  (spinner + status line), and that a **DashRelay iPhone on the same Wi‑Fi** is
-  needed. Action shown *only when appropriate*: **Disconnect** while
-  `discovering` / `connecting`; **Search for DashRelay** while `disconnected`
-  (idle after a deliberate disconnect); nothing while `connected`. A nested
-  `ConnectionSetupView.Display` value type does the pure state → display mapping.
-  Layout is `GeometryReader` + `ScrollView` with a centred, width-capped
-  (`maxWidth: 460`) content column — works in iPad portrait and landscape (and
-  on iPhone). **No pairing controls.** Visuals are intentionally plain.
-- **[Implemented]** `DashApp` owns `LocationStore`, `ConnectionCoordinator`, and
-  `KnownDeviceStore` as `@StateObject`s, injects them as `environmentObject`s,
-  calls `connection.startSession()` in `.task`, and
-  `GoogleMapsConfiguration.bootstrap()` in `init()`.
+  `KnownDeviceStoring`; a `[KnownRelay]` **keyed by the relay's stable id**
+  (`RelayAdvertisement.id`) persisted as JSON in `UserDefaults`;
+  `remember` / `forget` / `forgetAll` / `isKnown(id:)` / `pairedRelay` (first
+  known). Still **storage only** — no networking; the coordinator decides *when*
+  to call `remember` / `forget`.
+- **[Implemented]** `RootView` — gates the UI: when connected, `ContentView`
+  (dashboard) with a `ConnectedControlView` overlaid top-trailing; otherwise
+  `ConnectionSetupView`. Builds the setup screen's `Model` from the coordinator
+  and wires every action (`disconnect` / `startSession` /
+  `pairAndConnect(to:named:)` / `forgetPairedRelay`).
+- **[Implemented]** `ConnectionSetupView` (`Features/Connection/`) — the
+  connection/setup + **pairing** screen, shown whenever Dash is not connected.
+  Presentational: takes `ConnectionSetupView.Model` (state + `offerableRelays` +
+  `pairedRelayName`) and closures (`onPair`, `onForget`, `onStopSearching`,
+  `onSearch`) — no store, no network. One bit of local state: the "name this
+  iPhone" alert. Renders:
+  - **first-time, nothing paired, ≥1 relay visible** → a tappable **device list**
+    (name + short id); tapping opens an alert with a text field pre-filled with
+    the advertised name → `onPair(relay, name)` pairs (with the friendly name)
+    and connects;
+  - **paired but relay not visible** → spinner + "Looking for `<name>`…", never a
+    stranger in the list;
+  - *discovering (nothing yet)* / *connecting* → spinner + status; *disconnected*
+    → **Search for DashRelay**; **Stop Searching** whenever a live attempt exists
+    (wired to `disconnect()` — deliberate/sticky);
+  - a **"Forget `<name>`"** button whenever a device is paired.
+  Nested `ConnectionSetupView.Display` does the pure `Model` → screen mapping
+  (incl. `forgetLabel`). Layout unchanged (`GeometryReader` + `ScrollView`,
+  centred, `maxWidth: 460`) — iPad portrait + landscape and iPhone. Visuals
+  still intentionally plain.
+- **[Implemented]** `ConnectedControlView` (`Features/Connection/`) — a compact
+  pill `RootView` overlays on the dashboard while connected. Shows the paired
+  iPhone's friendly name (`ConnectionCoordinator.pairedRelayDisplayName`, falling
+  back to "DashRelay") and, via a confirmation dialog, **Disconnect** (ends the
+  session, keeps the pairing → `disconnect()`) and **Forget `<name>`** (drops the
+  pairing → `forgetPairedRelay()`). Presentational; only local state is the
+  dialog. Does **not** touch `ContentView` or the map. `.overlay(alignment:
+  .topTrailing)` + `padding(12)` keeps it inside the safe area in both
+  orientations.
+- **[Implemented]** `DashApp` owns `LocationStore`, `KnownDeviceStore`, and
+  `ConnectionCoordinator` (constructed with the store + known-device store) as
+  `@StateObject`s, injects them as `environmentObject`s, calls
+  `connection.startSession()` in `.task`, and `GoogleMapsConfiguration.bootstrap()`
+  in `init()`.
 - **[Implemented]** Map abstraction: `MapProvider` protocol (`id`,
   `makeMapView(camera:) -> AnyView`), `MapProviderID` enum
   (`googleMaps`, `appleMaps`), `MapCameraState` (lat/lon/`headingDegrees?`/zoom
@@ -390,24 +509,55 @@ not replace their responsibilities.
   retains packet, recovers after stale, watchdog `Task` fires on its own,
   `connectionEnded()` returns to `.waiting` keeping the last packet,
   `connectionEnded()` stays `.waiting` past the interval.
-- **[Verified · automated]** `ConnectionCoordinatorTests` (12): starts
-  disconnected; `disconnected→discovering` on `startSession()`;
-  `discovering→connecting`; `connecting→connected` (exposes device name);
-  `connected→disconnected` path; deliberate disconnect stops the transport;
-  **deliberate disconnect does not immediately reconnect**; `startSession()`
-  re-arms after a disconnect; packets flow to `LocationStore` (not the
-  coordinator); deliberate disconnect resets the store signal; pure phase
-  mapping; **known-device state is independent of connection state**.
-- **[Verified · automated]** `KnownDeviceStoreTests` (7): starts empty, remember
-  adds, remember is idempotent by id, forget removes, multiple devices,
-  `forgetAll`, persists across store instances.
-- **[Verified · automated]** `ConnectionSetupViewTests` (5): the `Display` state →
-  screen mapping — `disconnected` offers *search* with no spinner; `discovering`
-  and `connecting` show a spinner and offer *Disconnect*; `connected` offers no
-  action; every state has status text.
-- **[Verified · simulator]** `ConnectionSetupView` rendered on the iPad simulator
-  in the `discovering` state, in both **portrait and landscape** (content stays
-  centred and width-capped, nothing clipped), and on iPhone portrait.
+- **[Verified · automated]** `ConnectionCoordinatorTests` (22), driven through a
+  stub `LocationReceiving` + a real (suite-isolated) `KnownDeviceStore` — no
+  Bonjour/TCP:
+  - state machine: starts disconnected; `disconnected→discovering` on
+    `startSession()`; `discovering→connecting→connected` (exposes
+    `connectedRelayID` / `connectedDisplayName`); `connected→discovering` on a
+    transport drop; pure phase mapping; packets flow to `LocationStore` only;
+    deliberate disconnect resets the store signal.
+  - **first-time pairing:** multiple discovered relays are surfaced and **none is
+    auto-chosen**; selecting one targets it **and** persists the `KnownRelay`;
+    the pairing survives a fresh `KnownDeviceStore` instance.
+  - **subsequent launches:** a paired relay is **targeted immediately** on
+    `startSession()`; an **unrelated nearby relay is never targeted**; when the
+    paired relay is not visible the coordinator keeps looking and exposes its
+    name, offering no stranger.
+  - **Disconnect vs Forget:** Disconnect keeps the `KnownRelay`; **a deliberate
+    disconnect does not immediately reconnect** even when the paired relay is
+    re-discovered; the user can `startSession()` again afterwards; **Forget**
+    removes the `KnownRelay`, clears the target, and returns to first-time
+    browsing.
+  - **friendly name at pairing:** `pairAndConnect(to:named:)` stores the trimmed
+    user-typed name as `KnownRelay.displayName` (**stable `id` unchanged**), a
+    blank/whitespace/nil name falls back to the advertised name, and
+    `pairedRelayDisplayName` exposes the name even while `.connected` (for
+    `ConnectedControlView`).
+  - separation: remembering a device doesn't change connection state; connecting
+    doesn't auto-pair.
+- **[Verified · automated]** `ConnectedControlViewTests` (2): the paired-device
+  label uses the friendly name, and falls back to "DashRelay" when it's nil/blank.
+- **[Verified · automated]** `KnownDeviceStoreTests` (7): starts empty (no
+  `pairedRelay`), remember adds and becomes `pairedRelay`, remember is idempotent
+  by id and refreshes the name, forget removes, multiple devices, `forgetAll`,
+  persists across store instances.
+- **[Verified · automated]** `ConnectionSetupViewTests` (8): the `Model` →
+  `Display` mapping — `disconnected` offers *Search*, no spinner; *discovering*
+  with candidates and no pairing shows the **device list**; *discovering* while
+  paired-but-not-visible shows "**Looking for `<name>`…**" and no list;
+  *connecting* / *discovering-empty* show a spinner + **Stop Searching**;
+  *connecting* names the paired relay; *connected* offers no action;
+  **`forgetLabel` is "Forget `<name>`" exactly when a device is paired** (and
+  "Forget This iPhone" for a nameless pairing); every state has status text.
+- **[Verified · Xcode Preview]** Earlier `ConnectionSetupView` pairing states
+  were rendered via Xcode Previews (device list, "Looking for `<name>`…") in
+  portrait and landscape. **This round's changes — the "name this iPhone" alert,
+  the "Stop Searching" label, "Forget `<name>`", and `ConnectedControlView` —
+  have not been re-rendered on a real screen** (covered by the `Display` /
+  `deviceLabel` unit tests). Layout is unchanged (same width-capped
+  `GeometryReader` + `ScrollView`); the overlay uses `.overlay(alignment:
+  .topTrailing)` + safe-area padding.
 - **[Verified · automated]** `MapCameraStateTests` + `MapViewModelTests` (7):
   default heading is `nil`, `following` re-centres and keeps zoom, negative
   heading → `nil`, zero heading kept, default provider is `.googleMaps`,
@@ -432,17 +582,37 @@ not replace their responsibilities.
   not-connected screen to the dashboard — exercising the new gate end to end.
   (Deliberate disconnect and re-connect are covered by unit tests, not this
   manual check.)
+- **[Verified · on device, partial]** The **pairing flow was physically tested**
+  iPhone↔iPad over the iPhone's Personal Hotspot. First-time discovery + pick +
+  connect works. Getting there needed a fix: `NWBrowser` was created with the
+  PTR-only `.bonjour(type:domain:)` descriptor, so every `NWBrowser.Result`
+  arrived with `metadata == .none` and the identity TXT record never reached
+  Dash — the browser now uses **`.bonjourWithTXTRecord(type:domain:)`**
+  (`LocationReceiver`; `LocationReceiverTests` covers the metadata → advertisement
+  parse incl. the nil-metadata case). Temporary `[DISCOVERY-DIAG]` `os.Logger`
+  lines are still present in `LocationReceiver` / `ConnectionCoordinator` pending
+  a final removal pass.
+- **[NOT verified on hardware]** Still only automated-verified: auto-preferring
+  the paired relay on a *later* launch, "Looking for `<name>`…" when it's absent,
+  Disconnect, Forget, "Stop Searching", DashRelay "Stop Sharing", the "name this
+  iPhone" prompt, and `ConnectedControlView`. Two physical relays being
+  disambiguated is also unverified.
 
 ### Automated test totals (all passing, 2026-09-01)
 
 | Suite | Tests | Runner |
 |---|---:|---|
-| `DashSharedTests` | 4 | `swift test` |
-| `DashRelayTests` | 25 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
-| `DashTests` | 54 (incl. 1 no-op scaffold) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+| `DashSharedTests` | 8 | `swift test` |
+| `DashRelayTests` | 32 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
+| `DashTests` | 71 (incl. 1 no-op scaffold) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
 
+`DashSharedTests` breakdown: `LocationPacketTests` (4), `RelayAdvertisementTests` (4).
 `DashRelayTests` breakdown: `LocationTrackerTests` (7), `LocationBroadcasterTests`
-(5), `RelaySessionControllerTests` (8), `RelayStatusViewTests` (5).
+(7), `RelayIdentityTests` (4), `RelaySessionControllerTests` (8),
+`RelayStatusViewTests` (6).
+`DashTests` (connection/pairing-relevant): `ConnectionCoordinatorTests` (22),
+`ConnectionSetupViewTests` (8), `ConnectedControlViewTests` (2),
+`KnownDeviceStoreTests` (7), `LocationReceiverTests` (7).
 
 ---
 
@@ -505,11 +675,13 @@ not replace their responsibilities.
    testability. Default `staleInterval` = 7 s. On staleness the last packet is
    **retained** (last-known position) and only a flag flips.
 
-5. **Multi-instance Bonjour picker deferred.** The spec wants a "Connect to:
-   [device]" picker when several relays are visible. For now `LocationReceiver`
-   connects to the first discovered endpoint and exposes `discoveredServiceCount`;
-   a `NOTE` in the code marks where the picker goes. (Pairing/forgetting is a
-   planned milestone — see §8.)
+5. **Multi-instance Bonjour picker — ~~deferred~~ done (superseded by 19–22).**
+   Originally `LocationReceiver` connected to the first discovered endpoint. As of
+   the pairing work it browses continuously, reports **all** visible relays
+   (`onDiscoveryChange`), and connects only to the one the user picked / the
+   paired one (`setTargetRelay(id:)`). `ConnectionSetupView` shows the list for a
+   first-time pick. Choosing *among several known devices* is still future work
+   (`pairedRelay` = the first).
 
 6. **Map abstraction shape.** `MapProvider` is `@MainActor` and returns a
    type-erased `AnyView` (`makeMapView(camera:) -> AnyView`) so providers can be
@@ -561,12 +733,16 @@ not replace their responsibilities.
     future status UI. Alternative — track only while connected — remains easy to
     switch to in `RelaySessionController`.
 
-15. **Pairing = known-device storage now, pairing *flow* later.** `KnownDeviceStore`
-    persists a list of `KnownRelay` (by Bonjour service name) and is fully tested,
-    but nothing yet decides when to add a device, offers a "Forget" action, or
-    restricts connections to known devices. `KnownDeviceStore` and
-    `ConnectionCoordinator` are deliberately decoupled;
-    `ConnectionCoordinator.connectedDeviceName` is the bridge for later.
+15. **Pairing = known-device storage now, pairing *flow* later.**
+    **Superseded by 19–22 (2026-09-01).** The pairing flow now exists.
+    `KnownDeviceStore` stays persistence-only, but `ConnectionCoordinator` now
+    holds an injected `any KnownDeviceStoring` reference (the two are no longer
+    "deliberately decoupled") — it reads the store to prefer the paired relay and
+    writes to it on an explicit pair/forget. `KnownRelay` is keyed by the relay's
+    stable id, not the Bonjour service name. The old
+    `ConnectionCoordinator.connectedDeviceName` bridge is replaced by
+    `connectedRelayID` / `connectedDisplayName` + the `pairAndConnect` / `forget`
+    methods.
 
 16. **`ConnectionState` is its own enum**, not a re-export of
     `LocationReceiver.Status.Phase`. The transport phase is a networking detail;
@@ -574,14 +750,15 @@ not replace their responsibilities.
     connecting / connected` vocabulary the spec's requirements used.
 
 17. **The connection/setup screen is presentational.** `ConnectionSetupView`
-    takes a `ConnectionState` + action closures rather than reading
-    `ConnectionCoordinator` from the environment. `RootView` is the container that
-    reads the single source and wires the actions. This keeps connection state
-    un-duplicated and makes the screen previewable/testable in any state
-    (`ConnectionSetupView.Display`). The dashboard falls back to the setup screen
-    on *any* non-connected state — including a brief incidental drop. Keeping the
-    dashboard visible with a "signal lost" overlay during short reconnects is a
-    deliberate later refinement (spec §3.7 / §4), not done here.
+    takes a `ConnectionSetupView.Model` (state + `offerableRelays` +
+    `pairedRelayName`) + action closures rather than reading `ConnectionCoordinator`
+    or `KnownDeviceStore` from the environment. `RootView` is the container that
+    reads the single source and wires the actions (including `onSelectRelay` /
+    `onForget`). This keeps connection state un-duplicated and the screen
+    testable in any state (`ConnectionSetupView.Display`). The dashboard still
+    falls back to the setup screen on *any* non-connected state, including a
+    brief incidental drop — the "signal lost overlay, keep the dashboard up"
+    refinement (spec §3.7 / §4) is still not done here.
 
 18. **DashRelay's status screen follows the same presentational pattern.**
     `RelayStatusScreen` (container, reads `RelaySessionController`) →
@@ -593,6 +770,73 @@ not replace their responsibilities.
     (`LocationBroadcaster.Status`), not a Bonjour name for the Dash client — so
     surfacing the connected device would need new plumbing in the broadcaster /
     session layer, deferred with pairing.
+
+19. **Device identity for pairing = a persisted UUID in the Bonjour TXT record.**
+    *Decision recorded per the task's "PAIRING IDENTITY" requirement.*
+    - **What already existed:** the Bonjour service *type* (`_dashrelay._tcp`,
+      shared, not an identity) and the service *instance name* — which
+      `LocationBroadcaster` hardcoded to `"DashRelay"` for every relay. So there
+      was **no** stable, unique per-device identity: two relays could not be told
+      apart, and iOS renames colliding instance names non-deterministically.
+      `KnownRelay` keyed on that hardcoded string was unusable for the goals.
+    - **Smallest clean change made:** DashRelay mints a random `UUID` once
+      (`RelayIdentity`, persisted in `UserDefaults`) and publishes it — plus the
+      device name — in the **Bonjour TXT record** via `RelayAdvertisement` (new,
+      in `DashShared`, keys `rid` / `name`). Dash reads the TXT record straight
+      from `NWBrowser` results (no connection needed) and pairs on the `rid`.
+    - **Why the TXT record, not the instance name:** identity, display name, and
+      the transient Bonjour name stay separate concerns; a UUID never leaks into
+      a user-facing service name; the friendly name can change (phone renamed)
+      without breaking the pairing.
+    - **Trade-off:** deleting and reinstalling DashRelay generates a new id, so
+      the user re-pairs once. Acceptable — it keeps identity purely local, no
+      account or server (per the task constraint).
+
+20. **First-time pairing = discover-then-pick; no auto-connect to a stranger.**
+    With nothing paired, `LocationReceiver` browses but never connects on its
+    own. `ConnectionSetupView` lists every visible relay; the user taps one and
+    `ConnectionCoordinator.pairAndConnect(to:)` both persists the `KnownRelay`
+    and targets it. A single visible relay is **still** presented as a one-item
+    list rather than auto-connected — pairing is always an explicit choice.
+
+21. **Subsequent launches prefer the paired relay, and only it.** `startSession()`
+    targets the paired relay's id immediately. `LocationReceiver` connects when
+    that id appears and, after an incidental drop, reconnects **only to that id**.
+    If it never appears, the screen says "Looking for `<name>`…" indefinitely and
+    never offers a nearby stranger. Auto-connect among *known* devices fires only
+    when exactly one known relay is visible.
+
+22. **Disconnect vs Forget are distinct, and Forget is a coordinator capability.**
+    `disconnect()` ends the session, stays sticky (no auto-reconnect), and keeps
+    the `KnownRelay`. `forgetPairedRelay()` removes the `KnownRelay`, clears the
+    transport target (dropping the live session if it was to that relay), and
+    returns to first-time browsing. The UI exposes Forget as a single small
+    "Forget this iPhone" button (no settings screen yet); the model/coordinator
+    capability is the durable part.
+
+23. **Connection UX refinement (2026-09-01, post first physical pairing test).**
+    Small changes, no architecture change:
+    - **Wording** — while not connected, the stop action is **"Stop Searching"**
+      (was "Disconnect"); it still calls `disconnect()` (deliberate/sticky). The
+      first-time list header is "Choose your iPhone…".
+    - **Disconnect from Dash while connected** — a new presentational
+      `ConnectedControlView` is overlaid on `ContentView` by `RootView` (the
+      composition point — `ContentView`/map are untouched). It offers
+      **Disconnect** (keeps pairing) and **Forget `<name>`** via a confirmation
+      dialog. Extends §5 decision 17 (both connection views presentational; the
+      container wires them) to the connected state.
+    - **DashRelay stop-while-waiting** — `RelayStatusView`'s `.waiting` state
+      gained a **"Stop Sharing"** button (was action-less); it and "Disconnect"
+      both call `RelaySessionController.stop()`. So the relay is never forced to
+      advertise indefinitely.
+    - **Friendly name at pairing** — `pairAndConnect(to:named:)` takes the name
+      the user types in a "Name this iPhone" alert and stores it as
+      `KnownRelay.displayName`. **The stable `id` (TXT `rid`) is never affected**
+      — this is display metadata only (per §5 decision 19, identity ≠ display
+      name). Blank/whitespace/omitted falls back to the advertised name.
+      `ConnectionCoordinator.pairedRelayDisplayName` surfaces it regardless of
+      connection state. There is **no in-place rename** yet — changing the name
+      means Forget + re-pair.
 
 ---
 
@@ -607,16 +851,35 @@ not replace their responsibilities.
   **no last-sent-timestamp / packet-rate display** (spec §3 asks for "Relay
   active + last-sent timestamp"), **no connected-device name** (see decision 18),
   and the visuals are deliberately plain.
-- **Connection UI is minimal and not designed.** `ConnectionSetupView` covers
-  *not connected / discovering / connecting* with a Disconnect (or Search)
-  action, but the visuals are deliberately plain and there is no "GPS signal
-  lost" overlay on the dashboard, no device chooser, and the dashboard is torn
-  down on any brief drop (see decision 17).
-- **Pairing is storage-only.** `KnownDeviceStore` persists known devices and is
-  tested, but there is no pairing flow, no "Forget" affordance, no pairing
-  controls in `ConnectionSetupView`, and `LocationReceiver` still connects to the
-  **first** relay it discovers regardless of what's remembered. A multi-relay
-  picker is still needed.
+- **Connection/pairing UI is functional but not designed.** `ConnectionSetupView`
+  covers the device picker + "name this iPhone" prompt, "Looking for `<paired>`…",
+  "Stop Searching", and "Forget `<name>`"; `ConnectedControlView` covers
+  disconnect/forget while connected; DashRelay has "Stop Sharing"/"Disconnect".
+  Visuals are still deliberately plain, there is no "GPS signal lost" overlay on
+  the dashboard, and the dashboard is still torn down on any brief drop (see
+  decision 17). None of this round's UI has had a simulator/visual pass (see §3).
+- **No in-place rename of a paired relay.** The friendly name is captured once at
+  pairing; to change it the user must Forget and re-pair. `KnownDeviceStore` /
+  `KnownRelay` already support updating `displayName` in place — only the UI
+  affordance is missing.
+- **`ConnectedControlView` overlays the placeholder `ContentView`.** It is
+  attached in `RootView`, not in `ContentView`/the map, so it moves cleanly when
+  `Home/DashboardView` replaces the shell — but until then it floats over a
+  full-screen map with no designed placement.
+- **Pairing works but is single-device in practice.** `KnownDeviceStore` holds a
+  list and `ConnectionCoordinator` auto-connects only when *exactly one* known
+  relay is visible, but there is **no chooser among several known devices** —
+  `pairedRelay` is just the first. `forgetAll` exists in the store but isn't
+  surfaced. Restricting connections to *only* known devices is enforced
+  implicitly (the receiver targets one id) but there is no explicit allow-list.
+- **A DashRelay reinstall changes the relay id**, so the iPad silently stops
+  finding the "paired" phone until the user re-pairs (`Forget` → pick again). No
+  UI hint that this is why. Acceptable per decision 19; worth a nicer message
+  later.
+- **`LocationReceiver`'s Bonjour/TCP internals remain unit-untested.** The TXT
+  parsing, `setTargetRelay` connect/re-target logic, and reconnect-to-same-id
+  behaviour are only exercised on device / by the `ConnectionCoordinator` stub
+  tests. `RelayAdvertisement` parsing itself is unit-tested in `DashShared`.
 - **`MapViewModel.swift` has 2 build warnings** (pre-existing, unrelated to this
   layer): `main actor-isolated static property 'default' can not be referenced
   from a nonisolated context` at lines 24 and 28 — the `camera: MapCameraState
@@ -660,11 +923,16 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
   see §3. **Still [Planned]** on top of it: a **last-sent-timestamp / "relay
   active" indicator** (spec §3), a connected-device name (needs new session-layer
   plumbing, decision 18), and a designed visual pass.
-- **[Planned]** Device **pairing flow** — the storage exists (`KnownDeviceStore`);
-  still needed: deciding when to remember a device (pair-on-connect or an explicit
-  step), a multi-relay picker in/above `LocationReceiver` (it still auto-takes the
-  first result), a "Forget" affordance, and optionally restricting connections to
-  known devices.
+- **[Implemented]** Device **pairing flow** — stable TXT-record identity
+  (`RelayAdvertisement` / `RelayIdentity`), discover-then-pick first-time setup
+  with a friendly-name prompt, auto-prefer the paired relay on later launches,
+  never switch to a stranger, Disconnect (keeps pairing) reachable while
+  connected, and `forgetPairedRelay()` — see §3 and decisions 19–23. First-time
+  pair verified on hardware (§3 "End-to-end"). **Still [Planned]** on top of it:
+  a chooser among *several* known devices, in-place rename, a designed
+  Forget/settings surface, a friendlier "your paired iPhone changed /
+  reinstalled" message, and on-device verification of the *remaining* behaviours
+  (§6).
 - **[Planned]** `Home/DashboardView` — the CarPlay-style tile layout that
   assembles map + music + speedometer (the single layout owner); replaces the
   `RootView → ContentView` full-screen-map shell.
@@ -696,15 +964,18 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
 
 Roughly in order (adapts the spec §11 build order to where we are):
 
-1. **Connection UI, continued.** First cut is done (`ConnectionSetupView` +
-   `RootView` gate). Remaining: a "GPS signal lost" overlay driven by
+1. **Finish device verification of the connection UX.** First-time pair is
+   confirmed on hardware. Still to check on device: auto-prefer the paired relay
+   across a DashRelay relaunch, "Looking for `<name>`…" when it's absent,
+   Disconnect / Forget / "Stop Searching" / DashRelay "Stop Sharing", the "name
+   this iPhone" prompt, `ConnectedControlView` in both orientations, and two
+   physical relays being disambiguated. Then **remove the `[DISCOVERY-DIAG]`
+   logging** (§3 "End-to-end").
+2. **Connection UI, continued.** A "GPS signal lost" overlay driven by
    `LocationStore.signal`, keep the dashboard visible during brief incidental
-   drops (only fall back to setup after a sustained/deliberate disconnect), and a
-   designed visual pass.
-2. **Pairing flow.** Multi-relay picker (above/inside `LocationReceiver`), decide
-   when to `KnownDeviceStore.remember(...)` (using
-   `ConnectionCoordinator.connectedDeviceName`), a "Forget" action, optionally
-   filter connections to known devices.
+   drops (only fall back to setup after a sustained/deliberate disconnect), a
+   designed visual pass over the connection screens + the connected control,
+   in-place rename, and a chooser among *several* known devices.
 3. **DashRelay status screen, continued.** Basic screen is done
    (`RelayStatusScreen` / `RelayStatusView`). Remaining: a last-sent-timestamp /
    "relay active" indicator (spec §3), and — once the session layer exposes it —
@@ -771,6 +1042,8 @@ Git history on `main` (newest first):
 
 | Commit | Milestone |
 |---|---|
+| *(working tree, uncommitted)* | **physical-device discovery fix + connection UX refinement.** Discovery fix: `LocationReceiver`'s `NWBrowser` now uses `.bonjourWithTXTRecord(type:domain:)` instead of PTR-only `.bonjour(...)` — on device the plain descriptor delivered every result with `metadata == .none`, so the identity TXT never reached Dash (first-time pair now works iPhone↔iPad over Personal Hotspot). Testable seam `LocationReceiver.txtEntries(from:)` + `LocationReceiverTests` (7, incl. nil-metadata). UX (§5 decision 23): "Disconnect" while searching → **"Stop Searching"**; new `ConnectedControlView` overlay gives **Disconnect / Forget `<name>`** while connected (attached in `RootView`, not `ContentView`); DashRelay `.waiting` gains **"Stop Sharing"**; `pairAndConnect(to:named:)` stores a user-typed friendly name (**stable `id` untouched**) from a "Name this iPhone" alert, surfaced via `pairedRelayDisplayName`. Temporary `[DISCOVERY-DIAG]` `os.Logger` lines kept in `LocationReceiver` / `ConnectionCoordinator` pending a removal pass. Tests: `ConnectionCoordinatorTests` (22), `ConnectionSetupViewTests` (8), new `ConnectedControlViewTests` (2), `RelayStatusViewTests` (6). All green — DashShared 8, DashRelay 32, Dash 71. |
+| *(working tree, uncommitted)* | **first real Dash ↔ DashRelay pairing flow** — `DashShared` gains `RelayAdvertisement` (Bonjour TXT-record contract: stable `rid` + `name`). DashRelay: `RelayIdentity` mints/persists a per-install UUID; `LocationBroadcaster` publishes it in the service's TXT record (service name falls back to `"DashRelay"`). Dash: `LocationReceiver` reads each result's TXT record, reports the visible set via `onDiscoveryChange → [DiscoveredRelay]`, and connects **only** to the relay named by `setTargetRelay(id:)` — reconnecting only to that id, never "results.first". `KnownRelay` re-keyed to the stable id; `KnownDeviceStore` gains `pairedRelay`. `ConnectionCoordinator` now holds an injected `KnownDeviceStoring`, adds `discoveredRelays` / `connectedRelayID` / `connectedDisplayName` / `offerableRelays` / `pairedRelayName` and `pairAndConnect(to:)` / `forgetPairedRelay()`; auto-connects only to a *known* relay, never a stranger; Disconnect keeps the pairing, Forget removes it and returns to first-time browsing. `ConnectionSetupView` becomes a `Model`-driven picker + "Looking for `<name>`…" + a plain "Forget this iPhone" button. New/expanded tests: `RelayAdvertisementTests` (4), `RelayIdentityTests` (4), `LocationBroadcasterTests` (+2), `ConnectionCoordinatorTests` (18), `KnownDeviceStoreTests` (7, adapted), `ConnectionSetupViewTests` (8). All suites green (DashShared 8, DashRelay 31, Dash 63). **Pairing not yet verified device-to-device.** Device-identity rationale recorded in §5 decision 19. |
 | *(working tree, uncommitted)* | **first DashRelay connection/status UI** — `RelayStatusScreen` (container, reads `RelaySessionController`) + `RelayStatusView` (presentational, `State` + `onStart`/`onDisconnect` closures) in a new `DashRelay/Features/Status/` folder. Startup/waiting screen (`stopped` → Start; `waiting` → "Ready to Connect" + spinner) and a connected screen (`connected` → Disconnect, wired to the existing `RelaySessionController.stop()`). Connected screen shows a **generic** message — no device name, because the session layer does not expose a client name. `DashRelayApp` root swapped to `RelayStatusScreen`; `DashRelay/ContentView.swift` scaffold removed. New `RelayStatusViewTests` (5). `waiting` state rendered on the iPhone simulator, portrait + landscape. No pairing controls. |
 | `9ccf6e0` | **feat(connection): add setup screen** — first Dash connection/setup UI. `ConnectionSetupView` in `Dash/Features/Connection/`: shown by `RootView` whenever Dash is not connected; communicates *not connected / discovering / connecting* and that a DashRelay iPhone on the same Wi‑Fi is needed; offers **Disconnect** while discovering/connecting and **Search for DashRelay** while idle; no pairing controls. Presentational (`ConnectionState` + closures in, `ConnectionSetupView.Display` for the mapping). `RootView` gate: `ContentView` ⟺ `isConnected` else `ConnectionSetupView`. New `ConnectionSetupViewTests` (5). Rendered on iPad portrait + landscape and iPhone portrait in the simulator. DashRelay UI untouched. |
 | `9a02364` | **feat(connection): add session and pairing foundation** — iPad `ConnectionCoordinator` (`disconnected`/`discovering`/`connecting`/`connected`, `startSession()`/`disconnect()`, feeds `LocationStore`) + `RootView` gate; iPhone `RelaySessionController` (`stopped`/`waiting`/`connected`, `start()`/`stop()` controls GPS); `KnownDeviceStore` for pairing state (storage only). `LocationStore` narrowed to location data + watchdog (lost `linkPhase`). `LocationReceiver.Status` gains `connectedServiceName`; `LocationTracker` gains a `wantsTracking` gate. New: `ConnectionCoordinatorTests` (12), `KnownDeviceStoreTests` (7), `RelaySessionControllerTests` (8). Deliberate disconnect verified (unit) not to auto-reconnect and to stop GPS; gate verified in the simulator against a real relay. |
@@ -806,3 +1079,8 @@ Git history on `main` (newest first):
   Simulator shows `RelayStatusView` in the `waiting` state ("Ready to Connect" +
   spinner) in both portrait and landscape. `stopped` / `connected` are covered by
   unit tests only.
+- **Pairing flow — automated only.** The TXT-record identity, first-time device
+  pick, auto-prefer-paired, "Looking for `<name>`…", Disconnect-keeps-pairing and
+  Forget-removes-pairing behaviours are all covered by the Swift Testing suites
+  and nothing else. **Not** run device-to-device and **not** re-rendered in the
+  simulator this round.

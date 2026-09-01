@@ -4,16 +4,19 @@
 //
 //  Pairing / known-device state — conceptually separate from the *current*
 //  connection (`ConnectionCoordinator`). A "known device" is a DashRelay this
-//  iPad has been told to remember, identified by its Bonjour service name
-//  (spec §4: "remember the choice ... by Bonjour service name").
+//  iPad has been told to remember.
 //
-//  What exists today: durable storage for a list of known devices, with
-//  add / remove / list, ready for multiple devices.
+//  Identity: the relay's **stable id** from its Bonjour TXT record
+//  (`RelayAdvertisement.id`), not the Bonjour service name. The service name is
+//  identical for every relay and can be renamed by iOS on a collision; the id is
+//  minted once per DashRelay install and never changes. See PROJECT_STATUS.md
+//  ("device-identity decision").
 //
-//  What does NOT exist yet: any flow that decides *when* to remember a device
-//  (a pairing UI / "pair on connect"), a "Forget" affordance in the UI, or the
-//  connection layer filtering to known devices only. Those are the remaining
-//  pairing work — see PROJECT_STATUS.md.
+//  This type is storage only — it never touches the network. `ConnectionCoordinator`
+//  reads it to decide which relay to prefer, and writes to it (via `remember` /
+//  `forget`) when the user pairs or forgets a device. The list is kept so the
+//  design extends to multiple known devices; today `pairedRelay` treats the first
+//  as "the" paired one.
 //
 
 import Combine
@@ -21,9 +24,9 @@ import Foundation
 
 /// A DashRelay instance this iPad remembers.
 struct KnownRelay: Codable, Equatable, Identifiable {
-    /// Stable identity = the Bonjour service name.
-    var id: String { bonjourServiceName }
-    let bonjourServiceName: String
+    /// Stable relay identity (Bonjour TXT `rid`). Matches `DiscoveredRelay.id`.
+    let id: String
+    /// Human-readable device name, refreshed from the advertisement on re-pair.
     var displayName: String
 }
 
@@ -34,7 +37,13 @@ protocol KnownDeviceStoring: AnyObject {
     func remember(_ device: KnownRelay)
     func forget(_ device: KnownRelay)
     func forgetAll()
-    func isKnown(bonjourServiceName: String) -> Bool
+    func isKnown(id: String) -> Bool
+}
+
+extension KnownDeviceStoring {
+    /// The relay Dash currently treats as paired. With multiple known devices the
+    /// first remembered wins; a chooser among known devices is future work.
+    var pairedRelay: KnownRelay? { knownDevices.first }
 }
 
 @MainActor
@@ -69,8 +78,8 @@ final class KnownDeviceStore: ObservableObject, KnownDeviceStoring {
         save()
     }
 
-    func isKnown(bonjourServiceName: String) -> Bool {
-        knownDevices.contains { $0.bonjourServiceName == bonjourServiceName }
+    func isKnown(id: String) -> Bool {
+        knownDevices.contains { $0.id == id }
     }
 
     // MARK: - Persistence

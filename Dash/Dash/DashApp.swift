@@ -24,9 +24,10 @@ struct DashApp: App {
         GoogleMapsConfiguration.bootstrap()
 
         let store = LocationStore()
+        let known = KnownDeviceStore()
         _locationStore = StateObject(wrappedValue: store)
-        _connection = StateObject(wrappedValue: ConnectionCoordinator(locationStore: store))
-        _knownDevices = StateObject(wrappedValue: KnownDeviceStore())
+        _knownDevices = StateObject(wrappedValue: known)
+        _connection = StateObject(wrappedValue: ConnectionCoordinator(locationStore: store, knownDevices: known))
     }
 
     var body: some Scene {

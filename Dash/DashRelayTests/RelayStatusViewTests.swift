@@ -20,10 +20,10 @@ struct RelayStatusViewTests {
         #expect(d.showsActivity == false)
     }
 
-    @Test("waiting: ready, shows activity, no action (connects on its own)")
+    @Test("waiting: ready, shows activity, offers Stop Sharing")
     func waiting() {
         let d = RelayStatusView.Display(.waiting)
-        #expect(d.action == .none)
+        #expect(d.action == .stopSharing)
         #expect(d.showsActivity)
         #expect(d.title == "Ready to Connect")
     }
@@ -33,6 +33,14 @@ struct RelayStatusViewTests {
         let d = RelayStatusView.Display(.connected)
         #expect(d.action == .disconnect)
         #expect(d.showsActivity == false)
+    }
+
+    @Test("the waiting state can be stopped rather than left running forever")
+    func waitingIsStoppable() {
+        // stopped → only Start; waiting → Stop Sharing; connected → Disconnect.
+        #expect(RelayStatusView.Display(.stopped).action == .start)
+        #expect(RelayStatusView.Display(.waiting).action == .stopSharing)
+        #expect(RelayStatusView.Display(.connected).action == .disconnect)
     }
 
     @Test("every state has a non-empty title and message")

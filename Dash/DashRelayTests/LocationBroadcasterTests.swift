@@ -73,8 +73,29 @@ struct LocationBroadcasterTests {
 
     @Test("broadcast and stop before start are safe no-ops")
     func lifecycleGuards() {
-        let broadcaster = LocationBroadcaster()
+        let broadcaster = LocationBroadcaster(
+            advertisement: RelayAdvertisement(id: "test-id", displayName: "Test iPhone")
+        )
         broadcaster.broadcast(packet())
         broadcaster.stop()
+    }
+
+    @Test("advertises the relay identity for pairing")
+    func advertisesIdentity() {
+        let ad = RelayAdvertisement(id: "ABCD-1234", displayName: "Saksham's iPhone")
+        let broadcaster = LocationBroadcaster(advertisement: ad)
+
+        #expect(broadcaster.advertisedIdentity == ad)
+        // The Bonjour instance name is user-facing but not the pairing key.
+        #expect(broadcaster.advertisedServiceName == "Saksham's iPhone")
+    }
+
+    @Test("falls back to a constant service name when the device name is empty")
+    func serviceNameFallback() {
+        let broadcaster = LocationBroadcaster(
+            advertisement: RelayAdvertisement(id: "id-only", displayName: "")
+        )
+        #expect(broadcaster.advertisedServiceName == "DashRelay")
+        #expect(broadcaster.advertisedIdentity.id == "id-only")
     }
 }

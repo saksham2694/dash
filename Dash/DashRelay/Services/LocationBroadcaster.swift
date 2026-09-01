@@ -33,15 +33,28 @@ final class LocationBroadcaster: @unchecked Sendable {
     var onStatusChange: (@MainActor @Sendable (Status) -> Void)?
 
     private let serviceName: String
+    /// Identity + name published in the Bonjour TXT record so the iPad can pair
+    /// with *this* relay specifically (see `RelayAdvertisement` in `DashShared`).
+    private let advertisement: RelayAdvertisement
     private let queue = DispatchQueue(label: "com.sakshamsharma.DashRelay.broadcaster")
 
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     private var status = Status()
 
-    init(serviceName: String = "DashRelay") {
-        self.serviceName = serviceName
+    init(advertisement: RelayAdvertisement = RelayIdentity.load()) {
+        self.advertisement = advertisement
+        // The Bonjour instance name is user-facing but not an identity; fall back
+        // to a constant when the device name is empty. Pairing keys on the TXT id.
+        let name = advertisement.displayName
+        self.serviceName = name.isEmpty ? "DashRelay" : name
     }
+
+    /// The Bonjour instance name being advertised. Exposed for tests.
+    var advertisedServiceName: String { serviceName }
+
+    /// The identity being published in the TXT record. Exposed for tests.
+    var advertisedIdentity: RelayAdvertisement { advertisement }
 
     // MARK: - Lifecycle
 
@@ -92,7 +105,13 @@ final class LocationBroadcaster: @unchecked Sendable {
         guard listener == nil else { return }
         do {
             let listener = try NWListener(using: .tcp)
-            listener.service = NWListener.Service(name: serviceName, type: Self.serviceType)
+            let txt = NWTXTRecord(advertisement.txtRecordEntries)
+            listener.service = NWListener.Service(
+                name: serviceName,
+                type: Self.serviceType,
+                domain: nil,
+                txtRecord: txt.data
+            )
             listener.stateUpdateHandler = { [weak self] state in
                 self?.handleListenerState(state)
             }

@@ -2,14 +2,15 @@
 //  LocationReceiver.swift
 //  Dash
 //
-//  The iPad side of the GPS link. Discovers the DashRelay companion app via
-//  Bonjour, opens a TCP connection to it, and decodes the newline-delimited JSON
-//  stream into `LocationPacket` values.
+//  The iPad side of the GPS link. Discovers DashRelay companion apps via Bonjour,
+//  reads each one's identity from its TXT record, and — once the connection layer
+//  picks a target — opens a TCP connection to that specific relay and decodes the
+//  newline-delimited JSON stream into `LocationPacket` values.
 //
-//  It is the *only* thing that touches the network. Every decoded packet is handed
-//  out through `onPacket`; the future `LocationStore` will be the single consumer.
-//  Disconnects are treated as routine — the receiver goes back to browsing and
-//  reconnects on its own (spec §4).
+//  It is the *only* thing that touches the network. It does not decide which
+//  relay to use: `ConnectionCoordinator` calls `setTargetRelay(id:)`. After an
+//  incidental drop it reconnects **only to that target**, never to whatever else
+//  happens to be nearby (spec §4).
 //
 
 import DashShared
@@ -30,19 +31,22 @@ final class LocationReceiver: @unchecked Sendable {
             case connected
         }
         var phase: Phase = .stopped
-        /// How many DashRelay instances Bonjour currently sees.
-        var discoveredServiceCount = 0
-        /// The Bonjour service name of the relay we are connected to, once
-        /// `phase == .connected`. `nil` otherwise. The connection/session layer
-        /// uses this to identify which device it reached (e.g. for pairing).
-        var connectedServiceName: String?
+        /// The stable relay id we are connected to, once `phase == .connected`.
+        /// `nil` otherwise.
+        var connectedRelayID: String?
+        /// The connected relay's human-readable name, for display. `nil` unless
+        /// connected.
+        var connectedDisplayName: String?
     }
 
     /// Called on the main actor for every decoded packet, in arrival order.
     var onPacket: (@MainActor @Sendable (LocationPacket) -> Void)?
 
-    /// Called on the main actor whenever `Status` changes. Consumed by the UI later.
+    /// Called on the main actor whenever `Status` changes.
     var onStatusChange: (@MainActor @Sendable (Status) -> Void)?
+
+    /// Called on the main actor whenever the visible relay set changes.
+    var onDiscoveryChange: (@MainActor @Sendable ([DiscoveredRelay]) -> Void)?
 
     private let queue = DispatchQueue(label: "com.sakshamsharma.Dash.receiver")
     private let reconnectDelay: TimeInterval
@@ -53,7 +57,20 @@ final class LocationReceiver: @unchecked Sendable {
     private var lineBuffer = PacketLineBuffer()
     private var reconnectWorkItem: DispatchWorkItem?
     private var status = Status()
-    private var pendingServiceName: String?
+
+    /// The relay the connection layer wants us pinned to. `nil` ⇒ browse only.
+    private var targetRelayID: String?
+
+    /// Everything Bonjour currently sees, keyed by stable relay id.
+    private var discovered: [String: Discovered] = [:]
+
+    /// The relay we are currently opening / holding a connection to.
+    private var pendingRelay: Discovered?
+
+    private struct Discovered: Sendable {
+        let advertisement: RelayAdvertisement
+        let endpoint: NWEndpoint
+    }
 
     init(reconnectDelay: TimeInterval = 2) {
         self.reconnectDelay = reconnectDelay
@@ -61,7 +78,8 @@ final class LocationReceiver: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
-    /// Begin discovering and connecting. Safe to call more than once.
+    /// Begin discovering. Does not connect until `setTargetRelay(id:)` names one.
+    /// Safe to call more than once.
     func start() {
         queue.async { [self] in
             guard !isActive else { return }
@@ -70,17 +88,40 @@ final class LocationReceiver: @unchecked Sendable {
         }
     }
 
-    /// Stop everything and drop the connection. Safe to call anytime.
+    /// Stop everything, drop the connection, and clear the target. Safe anytime.
     func stop() {
         queue.async { [self] in
             isActive = false
+            targetRelayID = nil
             cancelReconnect()
             closeConnection()
             browser?.cancel()
             browser = nil
             lineBuffer.reset()
-            pendingServiceName = nil
+            discovered.removeAll()
+            emitDiscovery()
             updateStatus { $0 = Status() }
+        }
+    }
+
+    func setTargetRelay(id: String?) {
+        queue.async { [self] in
+            guard targetRelayID != id else { return }
+            targetRelayID = id
+
+            // Drop a connection that no longer matches the target.
+            if connection != nil, status.connectedRelayID != id {
+                closeConnection()
+                lineBuffer.reset()
+                updateStatus {
+                    $0.phase = self.isActive ? .browsing : .stopped
+                    $0.connectedRelayID = nil
+                    $0.connectedDisplayName = nil
+                }
+                if isActive { startBrowsing() }
+            }
+
+            connectToTargetIfPossible()
         }
     }
 
@@ -94,8 +135,13 @@ final class LocationReceiver: @unchecked Sendable {
     private func startBrowsing() {
         guard isActive, browser == nil, connection == nil else { return }
 
+        // `.bonjourWithTXTRecord` (not plain `.bonjour`) — the plain descriptor is
+        // PTR-only and delivers every result with `metadata == .none`, so the
+        // relay's identity TXT record (`rid` / `name`) never reaches us. This
+        // descriptor asks the framework to resolve and attach the TXT record to
+        // each result's `metadata`.
         let browser = NWBrowser(
-            for: .bonjour(type: Self.serviceType, domain: nil),
+            for: .bonjourWithTXTRecord(type: Self.serviceType, domain: nil),
             using: .tcp
         )
         browser.stateUpdateHandler = { [weak self] state in
@@ -121,31 +167,52 @@ final class LocationReceiver: @unchecked Sendable {
     }
 
     private func handleBrowseResults(_ results: Set<NWBrowser.Result>) {
-        updateStatus { $0.discoveredServiceCount = results.count }
+        var seen: [String: Discovered] = [:]
+        for result in results {
+            guard let advertisement = Self.advertisement(from: result) else { continue }
+            seen[advertisement.id] = Discovered(advertisement: advertisement, endpoint: result.endpoint)
+        }
+        discovered = seen
+        emitDiscovery()
 
-        // Already connecting/connected, or nothing found yet — nothing to do.
-        guard connection == nil, let endpoint = results.first?.endpoint else { return }
+        connectToTargetIfPossible()
+    }
 
-        // NOTE (spec §4): with more than one DashRelay nearby this should surface a
-        // picker rather than pick blindly. That's a UI concern; for now take the
-        // first and let the count above drive a future chooser.
-        connect(to: endpoint)
+    /// Pull `RelayAdvertisement` out of a browse result's Bonjour TXT metadata.
+    /// Relies on the browser being created with `.bonjourWithTXTRecord` so the TXT
+    /// record is present in `result.metadata`. Relays without a valid identity are
+    /// ignored — they can't be matched against a `KnownRelay`.
+    private static func advertisement(from result: NWBrowser.Result) -> RelayAdvertisement? {
+        guard let entries = txtEntries(from: result.metadata) else { return nil }
+        return RelayAdvertisement(txtRecordEntries: entries)
+    }
+
+    /// Testable seam: the raw TXT key/value pairs carried by a browse result's
+    /// Bonjour metadata, or `nil` when the TXT record has not resolved yet
+    /// (`metadata == .none` — the exact physical-device failure this fix
+    /// addresses). Split out because `NWBrowser.Result` has no public initializer,
+    /// and kept to a plain dictionary so the mapping is trivially unit-testable.
+    static func txtEntries(from metadata: NWBrowser.Result.Metadata) -> [String: String]? {
+        guard case let .bonjour(txt) = metadata else { return nil }
+        return txt.dictionary
     }
 
     // MARK: - Connection (queue-confined)
 
-    private func connect(to endpoint: NWEndpoint) {
+    private func connectToTargetIfPossible() {
+        guard isActive, connection == nil,
+              let target = targetRelayID,
+              let match = discovered[target] else { return }
+        connect(to: match)
+    }
+
+    private func connect(to relay: Discovered) {
         browser?.cancel()
         browser = nil
         lineBuffer.reset()
+        pendingRelay = relay
 
-        if case let .service(name, _, _, _) = endpoint {
-            pendingServiceName = name
-        } else {
-            pendingServiceName = nil
-        }
-
-        let connection = NWConnection(to: endpoint, using: .tcp)
+        let connection = NWConnection(to: relay.endpoint, using: .tcp)
         connection.stateUpdateHandler = { [weak self] state in
             self?.handleConnectionState(state)
         }
@@ -157,9 +224,11 @@ final class LocationReceiver: @unchecked Sendable {
     private func handleConnectionState(_ state: NWConnection.State) {
         switch state {
         case .ready:
+            let relay = pendingRelay
             updateStatus {
                 $0.phase = .connected
-                $0.connectedServiceName = self.pendingServiceName
+                $0.connectedRelayID = relay?.advertisement.id
+                $0.connectedDisplayName = relay?.advertisement.displayName
             }
             receiveNextChunk()
         case .failed, .cancelled:
@@ -200,17 +269,19 @@ final class LocationReceiver: @unchecked Sendable {
         connection?.stateUpdateHandler = nil
         connection?.cancel()
         connection = nil
+        pendingRelay = nil
     }
 
     // MARK: - Reconnection (queue-confined)
 
+    /// Go back to browsing after a drop. The target relay id is kept, so when it
+    /// reappears we reconnect to *it* — not to whatever else is nearby.
     private func scheduleReconnect() {
         guard isActive, reconnectWorkItem == nil else { return }
-        pendingServiceName = nil
         updateStatus {
             $0.phase = .browsing
-            $0.discoveredServiceCount = 0
-            $0.connectedServiceName = nil
+            $0.connectedRelayID = nil
+            $0.connectedDisplayName = nil
         }
 
         let work = DispatchWorkItem { [weak self] in
@@ -227,15 +298,30 @@ final class LocationReceiver: @unchecked Sendable {
         reconnectWorkItem = nil
     }
 
-    // MARK: - Status
+    // MARK: - Callbacks
 
     private func updateStatus(_ mutate: (inout Status) -> Void) {
         var newValue = status
         mutate(&newValue)
         guard newValue != status else { return }
         status = newValue
+        emitStatus()
+    }
 
+    private func emitStatus() {
+        let value = status
         let callback = onStatusChange
-        Task { @MainActor in callback?(newValue) }
+        Task { @MainActor in callback?(value) }
+    }
+
+    private func emitDiscovery() {
+        let relays = discovered.values
+            .map { DiscoveredRelay(id: $0.advertisement.id, displayName: $0.advertisement.displayName) }
+            .sorted {
+                let byName = $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
+                return byName == .orderedSame ? $0.id < $1.id : byName == .orderedAscending
+            }
+        let callback = onDiscoveryChange
+        Task { @MainActor in callback?(relays) }
     }
 }
