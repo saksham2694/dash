@@ -25,7 +25,10 @@ struct DashMapView: View {
     var location: LocationPacket?
 
     var body: some View {
-        viewModel.provider.makeMapView(camera: viewModel.camera)
+        viewModel.provider
+            .makeMapView(content: viewModel.content) { event in
+                viewModel.handle(event)
+            }
             .onAppear { viewModel.update(with: location) }
             .onChange(of: location) { _, newLocation in
                 viewModel.update(with: newLocation)

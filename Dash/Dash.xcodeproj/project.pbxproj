@@ -12,6 +12,7 @@
 		40FACE03304603B5007A11BB /* DashShared in Frameworks */ = {isa = PBXBuildFile; productRef = 40FACE04304603B5007A11BB /* DashShared */; };
 		40FACE07304603B5007A11BB /* DashShared in Frameworks */ = {isa = PBXBuildFile; productRef = 40FACE08304603B5007A11BB /* DashShared */; };
 		40FACE12304603B5007A11BB /* GoogleMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 40FACE11304603B5007A11BB /* GoogleMaps */; };
+		40FACE22304603B5007A11BB /* GooglePlaces in Frameworks */ = {isa = PBXBuildFile; productRef = 40FACE21304603B5007A11BB /* GooglePlaces */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -119,6 +120,7 @@
 			files = (
 				407EC624304603B5007A11BB /* DashShared in Frameworks */,
 				40FACE12304603B5007A11BB /* GoogleMaps in Frameworks */,
+				40FACE22304603B5007A11BB /* GooglePlaces in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -229,6 +231,7 @@
 			packageProductDependencies = (
 				407EC623304603B5007A11BB /* DashShared */,
 				40FACE11304603B5007A11BB /* GoogleMaps */,
+				40FACE21304603B5007A11BB /* GooglePlaces */,
 			);
 			productName = Dash;
 			productReference = 407EC5CD3045F8FB007A11BB /* Dash.app */;
@@ -397,6 +400,7 @@
 			packageReferences = (
 				407EC622304603B5007A11BB /* XCLocalSwiftPackageReference "../DashShared" */,
 				40FACE10304603B5007A11BB /* XCRemoteSwiftPackageReference "ios-maps-sdk" */,
+				40FACE20304603B5007A11BB /* XCRemoteSwiftPackageReference "ios-places-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 407EC5CE3045F8FB007A11BB /* Products */;
@@ -1042,6 +1046,14 @@
 				minimumVersion = 11.1.0;
 			};
 		};
+		40FACE20304603B5007A11BB /* XCRemoteSwiftPackageReference "ios-places-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googlemaps/ios-places-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1065,6 +1077,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 40FACE10304603B5007A11BB /* XCRemoteSwiftPackageReference "ios-maps-sdk" */;
 			productName = GoogleMaps;
+		};
+		40FACE21304603B5007A11BB /* GooglePlaces */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 40FACE20304603B5007A11BB /* XCRemoteSwiftPackageReference "ios-places-sdk" */;
+			productName = GooglePlaces;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

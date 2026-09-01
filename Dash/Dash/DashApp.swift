@@ -20,8 +20,10 @@ struct DashApp: App {
     @StateObject private var knownDevices: KnownDeviceStore
 
     init() {
-        // Hand the Google Maps SDK its API key before any map view is created.
+        // Hand the Google Maps + Places SDKs their API key before any map view
+        // or place lookup happens.
         GoogleMapsConfiguration.bootstrap()
+        GooglePlacesConfiguration.bootstrap()
 
         let store = LocationStore()
         let known = KnownDeviceStore()

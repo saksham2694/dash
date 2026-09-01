@@ -22,6 +22,20 @@ without conversation history.
   4. a **connection UX refinement** — "Stop Searching", a disconnect/forget
      control on the dashboard while connected, DashRelay "Stop Sharing", and a
      friendly name captured at pairing (§5 item 23, §10).
+  5. the **Map "M1" architecture widening** — the map-rendering boundary now
+     carries a full SDK-neutral render state (`MapContent`: camera plan, vehicle,
+     polylines, markers) in and a `MapEvent` stream (map/POI/marker taps,
+     camera-idle) out, plus a `MapMode` and a bounds-fit camera plan. No new
+     SDKs, no search/routing/navigation — scaffolding only (§3 "Map abstraction",
+     §5 item 24, §10).
+  6. the **Map "M2" destination search** — Google **Places SDK** for iOS added
+     (`GooglePlaces`, SPM), a provider-neutral `PlaceSearchService` +
+     `GooglePlaceSearchService`, an SDK-free `PlaceSearchViewModel` +
+     `DestinationStore` + `Destination` / `PlaceSuggestion`, a custom
+     `MapSearchView`, and `MapViewModel.setDestination(_:)` (pin +
+     frame-vehicle-and-destination + `.destinationPreview`). No routing / no
+     navigation / no Apple Maps. **Needs "Places API (New)" enabled in Google
+     Cloud** (§9). (§3 "Map — search", §5 item 25, §9, §10).
 - **Authoritative requirements:** `PROJECT_SPEC.pdf` (repo root) — "iPad CarPlay-style Dashboard — Project Spec"
 - **Day-to-day guidance:** `CLAUDE.md` (repo root)
 
@@ -88,12 +102,13 @@ dash/
     │   ├── GoogleMapsService.xcconfig          # git-ignored, holds the real API key
     │   └── GoogleMapsService.xcconfig.template # committed template
     ├── Dash/                        # iPad app target
-    │   ├── DashApp.swift            # @main; owns LocationStore + ConnectionCoordinator + KnownDeviceStore; bootstraps Google Maps
+    │   ├── DashApp.swift            # @main; owns LocationStore + ConnectionCoordinator + KnownDeviceStore; bootstraps Google Maps + Places
     │   ├── RootView.swift           # connection gate: ContentView (+ ConnectedControlView overlay) when isConnected, else ConnectionSetupView
-    │   ├── ContentView.swift        # full-screen DashMapView (the "dashboard" behind the gate for now — placeholder shell)
+    │   ├── ContentView.swift        # Map-feature composition: DashMapView + MapSearchView overlay; owns MapViewModel + PlaceSearchViewModel + DestinationStore (placeholder shell, not the dashboard)
     │   ├── Info.plist               # NSBonjourServices, GoogleMapsAPIKey = $(GOOGLE_MAPS_API_KEY)
     │   ├── Configuration/
-    │   │   └── GoogleMapsConfiguration.swift   # reads key from Info.plist, calls GMSServices.provideAPIKey
+    │   │   ├── GoogleMapsConfiguration.swift   # reads key from Info.plist, calls GMSServices.provideAPIKey; also exposes `apiKey`
+    │   │   └── GooglePlacesConfiguration.swift # calls GMSPlacesClient.provideAPIKey with the SAME key
     │   ├── Core/
     │   │   ├── LocationReceiver.swift          # NWBrowser + NWConnection; reads relay identity from the TXT record; targets ONE relay, reconnects only to it
     │   │   ├── LocationReceiving.swift         # protocol seam: start()/stop()/setTargetRelay(id:) + onDiscoveryChange (DI for ConnectionCoordinator tests)
@@ -106,12 +121,24 @@ dash/
     │   ├── Features/Connection/
     │   │   ├── ConnectionSetupView.swift       # not-connected / setup screen: device picker + "name this iPhone" prompt, "looking for <paired>", "Stop Searching", Forget <name> (presentational)
     │   │   └── ConnectedControlView.swift      # compact overlay shown on the dashboard while connected: names the iPhone, offers Disconnect / Forget (presentational)
-    │   └── Features/Map/
-    │       ├── MapProvider.swift               # protocol boundary + MapProviderID enum
-    │       ├── MapCameraState.swift            # SDK-neutral camera value type + following(_:)
-    │       ├── MapViewModel.swift              # holds active provider + camera; transforms packets
+    │   └── Features/Map/                       # all SDK-neutral except GoogleMapProvider.swift
+    │       ├── MapProvider.swift               # rendering-only protocol (MapContent in, MapEvent out) + MapProviderID
+    │       ├── MapGeometry.swift               # MapCoordinate + MapCoordinateBounds (tightest-box math)
+    │       ├── MapCameraState.swift            # camera value type + following(_:); MapCameraPlan (.follow / .fit)
+    │       ├── MapContent.swift                # the render state: camera plan, vehicle, polylines, markers
+    │       ├── MapOverlay.swift                # MapPolyline + MapMarker (identified, diffable overlay descriptors)
+    │       ├── MapEvent.swift                  # taps (map / POI / marker) + camera-idle; MapPOI, MapCameraPosition
+    │       ├── MapMode.swift                   # cruising / destinationPreview / navigating (only cruising is realised)
+    │       ├── MapViewModel.swift              # holds provider + mode + destination; derives MapContent; setDestination(_:); routes MapEvent
     │       ├── DashMapView.swift               # neutral SwiftUI component
-    │       └── GoogleMapProvider.swift         # ONLY file importing GoogleMaps; wraps GMSMapView
+    │       ├── GoogleMapProvider.swift         # ONLY Map file importing GoogleMaps; wraps GMSMapView, diffs overlays, bridges the delegate
+    │       └── Search/                         # M2 — destination search (all SDK-neutral except GooglePlaceSearchService.swift)
+    │           ├── Destination.swift           # Destination + PlaceSuggestion value types
+    │           ├── PlaceSearchService.swift    # provider-neutral protocol (suggestions / details) + PlaceSearchError
+    │           ├── GooglePlaceSearchService.swift  # ONLY Map file importing GooglePlaces; autocomplete + place details (New), session token
+    │           ├── DestinationStore.swift      # @MainActor ObservableObject — the chosen Destination? (source of truth)
+    │           ├── PlaceSearchViewModel.swift  # SDK-free: debounce, suggestions, resolve-to-Destination via onDestinationChosen
+    │           └── MapSearchView.swift         # custom search field + suggestions list + selected-destination chip (presentational)
     │   # (spec-planned but NOT present: Models/, Features/Music, Features/Speedometer,
     │   #  Features/Settings, Home/DashboardView, Core/ThemeManager)
     ├── DashTests/                   # Swift Testing
@@ -122,7 +149,9 @@ dash/
     │   ├── ConnectionSetupViewTests.swift     # device-list / "looking for paired" / "Stop Searching" / Forget-<name> mapping
     │   ├── ConnectedControlViewTests.swift    # device-label fallback for the connected overlay
     │   ├── KnownDeviceStoreTests.swift
-    │   ├── MapCameraStateTests.swift
+    │   ├── MapCameraStateTests.swift          # location -> camera transform; MapViewModel basics
+    │   ├── MapContentTests.swift              # MapCoordinateBounds math; MapViewModel content/mode/destination derivation
+    │   ├── PlaceSearchTests.swift             # PlaceSearchViewModel (debounce/resolve, stub service) + DestinationStore
     │   └── DashTests.swift          # scaffold `example()` — no-op, still present
     ├── DashUITests/                 # Xcode scaffold only, no real tests
     └── DashRelay/                   # iPhone app target
@@ -201,12 +230,22 @@ store and transport logic stays in the receiver.
   (service type + JSON/date strategy + `\n` framing) and now `RelayAdvertisement`
   (the Bonjour TXT-record contract: `rid` + `name`) are defined once. `DashRelay`
   and `Dash` both go through them.
-- **The map is isolated behind `MapProvider`.** `import GoogleMaps` appears in
-  exactly two files: `GoogleMapProvider.swift` and `GoogleMapsConfiguration.swift`.
-  `MapProvider` / `MapCameraState` / `MapViewModel` / `DashMapView` are SDK-free.
-- **The map receives state as input.** `MapViewModel` holds no `LocationStore`
-  reference, no networking, no GPS — it converts a `LocationPacket` into a
-  `MapCameraState` via the pure `MapCameraState.following(_:)`.
+- **The map is isolated behind `MapProvider`; search is isolated behind
+  `PlaceSearchService`.** `import GoogleMaps` appears in exactly two files
+  (`GoogleMapProvider.swift`, `GoogleMapsConfiguration.swift`); `import GooglePlaces`
+  in exactly two (`GooglePlaceSearchService.swift`, `GooglePlacesConfiguration.swift`).
+  Every other Map / Search file is SDK-free. `MapProvider` is **rendering only**
+  (a `MapContent` value in, a `MapEvent` closure back) — it has no search /
+  routing / place methods. Place search / autocomplete / details live on the
+  **separate `PlaceSearchService` protocol** (M2), so a MapKit provider can back
+  it with `MKLocalSearch` without touching the renderer. The chosen destination
+  is SDK-neutral (`Destination`) and held in its own `DestinationStore`.
+- **The map receives state as input, emits events as output.** `MapViewModel`
+  holds no `LocationStore` reference, no networking, no GPS. It converts a
+  `LocationPacket` into a follow `MapCameraState` (pure `following(_:)`), assembles
+  the full `MapContent` (camera plan + vehicle + overlays) for the active
+  `MapMode`, and routes `MapEvent`s back. Overlay lists and the non-`cruising`
+  modes are modelled but not yet populated (no routes/search exist).
 - **Bonjour discovery, never a hardcoded IP** — on both sides.
 - **The receiver connects to ONE identified relay, not "results.first".**
   `LocationReceiver` browses continuously, reports every visible relay via
@@ -484,22 +523,77 @@ not replace their responsibilities.
   `@StateObject`s, injects them as `environmentObject`s, calls
   `connection.startSession()` in `.task`, and `GoogleMapsConfiguration.bootstrap()`
   in `init()`.
-- **[Implemented]** Map abstraction: `MapProvider` protocol (`id`,
-  `makeMapView(camera:) -> AnyView`), `MapProviderID` enum
-  (`googleMaps`, `appleMaps`), `MapCameraState` (lat/lon/`headingDegrees?`/zoom
-  + `.default` + `following(_:)`), `MapViewModel` (holds `any MapProvider` +
-  camera; `update(with:)`), `DashMapView` (neutral component; feeds `location`
-  into the view model via `.onChange`/`.onAppear`).
-- **[Implemented]** `GoogleMapProvider` — the live Google Maps view. Wraps
-  `GMSMapView` in a private `UIViewRepresentable`; a `Coordinator` holds a
-  `GMSMarker` for the vehicle position; `updateUIView` animates the camera and
-  moves the marker; `isMyLocationEnabled = false` (position comes from the relay,
-  not the iPad's own CoreLocation).
+- **[Implemented]** Map abstraction (widened in the "M1" pass — see §5 item 24):
+  - `MapProvider` — **rendering-only** protocol: `id` +
+    `makeMapView(content: MapContent, onEvent: @escaping (MapEvent) -> Void) -> AnyView`.
+    No search / routing / place methods, by design.
+  - `MapGeometry` — `MapCoordinate` and `MapCoordinateBounds` (`init?([MapCoordinate])`
+    → tightest box; `center`).
+  - `MapCameraState` — unchanged value type (lat/lon/`headingDegrees?`/zoom +
+    `.default` + `following(_:)`), now also `center`. `MapCameraPlan` — `.follow(MapCameraState)`
+    or `.fit(MapCoordinateBounds, padding:)` (the fit case is unused until routing).
+  - `MapContent` — the full render state: `camera: MapCameraPlan`, `vehicle: MapCoordinate`,
+    `polylines: [MapPolyline]`, `markers: [MapMarker]`. `Equatable` for provider-side diffing.
+  - `MapOverlay` — `MapPolyline` (`id` + `coordinates`) and `MapMarker`
+    (`id` + `coordinate` + `title?`), both `Identifiable`.
+  - `MapEvent` — `.tappedMap` / `.tappedPOI(MapPOI)` / `.tappedMarker(id:)` /
+    `.cameraIdle(MapCameraPosition, byUserGesture:)`.
+  - `MapMode` — `cruising` / `destinationPreview` / `navigating`. As of M2
+    `destinationPreview` is realised (a chosen destination); `navigating` still
+    falls back to follow.
+  - `MapViewModel` — holds `any MapProvider` + `mode` + the retained follow
+    `camera` + the current `destination`; `update(with:)` re-centres and rebuilds
+    `content` (but leaves the camera alone while previewing); `setMode(_:)`;
+    **`setDestination(_:)`** (M2 — drops/removes the pin, frames vehicle +
+    destination, toggles `.destinationPreview` ⟷ `.cruising`); `handle(_ event:)`
+    (still a documented no-op seam).
+  - `DashMapView` — neutral component; feeds `location` in via `.onChange` /
+    `.onAppear`, forwards `MapEvent`s to `viewModel.handle`.
+- **[Implemented]** Destination search (M2 — see §5 item 25):
+  - `Destination` / `PlaceSuggestion` — SDK-neutral value types (`placeID`,
+    name, address?, `MapCoordinate` / primary+secondary text).
+  - `PlaceSearchService` — provider-neutral `@MainActor` protocol:
+    `suggestions(matching:near:) async throws -> [PlaceSuggestion]` and
+    `details(for placeID:) async throws -> Destination`; `PlaceSearchError`
+    (`placeNotFound` / `unavailable`). **Separate from `MapProvider`.**
+  - `GooglePlaceSearchService` — the only Search file importing `GooglePlaces`.
+    Autocomplete (`GMSAutocompleteRequest` / `fetchAutocompleteSuggestions`) +
+    Place Details New (`GMSFetchPlaceRequest` / `fetchPlace`), one lazily-minted
+    `GMSAutocompleteSessionToken` per search run (cleared after `details`),
+    location bias around the vehicle. Maps GMS errors to `PlaceSearchError`.
+  - `DestinationStore` — `@MainActor ObservableObject`, the source of truth for
+    the chosen `Destination?` (`select` / `clear` / `hasDestination`).
+  - `PlaceSearchViewModel` — SDK-free orchestration: `@Published query` with a
+    debounced lookup (`runSearch` is the testable core), `suggestions` /
+    `isSearching` / `errorText`, `origin` for biasing, `choose(_:)` → `resolve`
+    → `onDestinationChosen(Destination)`; `reset()`.
+  - `MapSearchView` — a custom SwiftUI search field + suggestions list, and a
+    compact chip (name / address / clear button) once a destination is chosen.
+    Presentational; no SDK, no map, no store.
+  - `ContentView` — the composition point: owns `MapViewModel`,
+    `PlaceSearchViewModel`, `DestinationStore`; wires
+    `searchVM.onDestinationChosen → destinationStore.select`,
+    `destinationStore.destination → mapVM.setDestination`, and the vehicle
+    coordinate → `searchVM.origin`. The three components don't know each other.
+- **[Implemented]** `GoogleMapProvider` — the live Google Maps view, and the only
+  Map file importing `GoogleMaps`. Wraps `GMSMapView` in a private
+  `UIViewRepresentable`; the `Coordinator` owns the vehicle `GMSMarker` plus
+  keyed dictionaries of route `GMSPolyline`s / destination `GMSMarker`s and
+  **diffs each `MapContent`** against the last render (camera / vehicle /
+  polylines / markers applied only on change); it is the `GMSMapViewDelegate` and
+  translates tap + `idleAt` callbacks (with a `willMove(byGesture:)` flag) into
+  `MapEvent`s. `isMyLocationEnabled = false` (position comes from the relay, not
+  the iPad's own CoreLocation). Existing behaviour preserved: vehicle marker,
+  follow camera, `.follow` animation on update. Overlay rendering paths exist but
+  receive no data yet.
 - **[Implemented]** `GoogleMapsConfiguration` — reads `GoogleMapsAPIKey` from the
-  bundle (build-injected, see §9) and calls `GMSServices.provideAPIKey`; returns
-  `false` and does nothing if unset. No key in source.
+  bundle (build-injected, see §9), exposes it as `apiKey`, and calls
+  `GMSServices.provideAPIKey`; returns `false` and does nothing if unset. No key
+  in source. `GooglePlacesConfiguration.bootstrap()` reuses the same `apiKey` for
+  `GMSPlacesClient.provideAPIKey`. Both are called from `DashApp.init()`.
 - **[Implemented]** `ContentView` currently renders a full-screen `DashMapView`
-  (temporary shell — this is **not** the dashboard layout).
+  with the `MapSearchView` overlay (temporary shell — this is **not** the
+  dashboard layout).
 - **[Verified · automated]** `PacketLineBufferTests` (9): single line, two lines
   per chunk, line split across chunks, partial trailing line held, blank lines
   ignored, malformed line skipped, oversized line dropped then recovers, `reset()`,
@@ -558,14 +652,33 @@ not replace their responsibilities.
   `deviceLabel` unit tests). Layout is unchanged (same width-capped
   `GeometryReader` + `ScrollView`); the overlay uses `.overlay(alignment:
   .topTrailing)` + safe-area padding.
-- **[Verified · automated]** `MapCameraStateTests` + `MapViewModelTests` (7):
-  default heading is `nil`, `following` re-centres and keeps zoom, negative
-  heading → `nil`, zero heading kept, default provider is `.googleMaps`,
+- **[Verified · automated]** `MapCameraStateTests` + `MapViewModelTests` (7,
+  unchanged): default heading is `nil`, `following` re-centres and keeps zoom,
+  negative heading → `nil`, zero heading kept, default provider is `.googleMaps`,
   `update(with:)` moves the camera, `update(with: nil)` is a no-op.
-- **[Verified · on device / simulator]** Dash builds, launches, initialises the
-  Google Maps SDK (v11.1.0) with the configured key, and renders the map with the
-  vehicle marker. Before any packet arrives the camera sits at
-  `MapCameraState.default` (lat 0 / lon 0).
+- **[Verified · automated]** `MapContentTests` (16): `MapCoordinateBounds`
+  — empty → `nil`, single coordinate → degenerate box, spans min/max lat & lon,
+  centre is the midpoint; `MapViewModel` — starts `.cruising` with no overlays and
+  `.follow(.default)`, a fix moves vehicle + follow camera together, `nil` fix is
+  a no-op, zoom persists across fixes, `setMode` fallback; **M2**: `setDestination`
+  drops a pin + enters `.destinationPreview`, the preview camera `.fit`s vehicle +
+  destination, a later fix moves the vehicle but not the camera, clearing removes
+  the pin and resumes `.follow`, a nameless destination → titleless marker.
+- **[Verified · automated]** `PlaceSearchTests` (11): `DestinationStore`
+  select/clear; `PlaceSearchViewModel` (stub service) — a sub-minimum query
+  doesn't hit the service, a valid query publishes suggestions, `origin` is
+  forwarded for biasing, a service failure clears results + shows an error, the
+  debounced path runs, clearing the query wipes results, `choose` resolves →
+  `onDestinationChosen` + field reset, a failed resolve shows an error + hands
+  out nothing, `reset` clears. **Google's SDK is not exercised** — a stub stands in.
+- **[Verified · on device / simulator]** Dash builds (clean, no warnings). Before
+  the M1 pass it launched, initialised the Google Maps SDK (v11.1.0), and
+  rendered the map + vehicle marker. **Not re-verified on a device/simulator
+  since M1:** the `GoogleMapProvider` delegate/diffing rewrite (M1) and **all of
+  M2** — `GooglePlaceSearchService` against the live Places API, the
+  `MapSearchView` UI, the destination pin / preview camera on a real map, and
+  `GMSPlacesClient.provideAPIKey` — are unit-covered on the SDK-neutral side only
+  (see §6).
 
 ### End-to-end
 
@@ -604,7 +717,7 @@ not replace their responsibilities.
 |---|---:|---|
 | `DashSharedTests` | 8 | `swift test` |
 | `DashRelayTests` | 32 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
-| `DashTests` | 71 (incl. 1 no-op scaffold) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+| `DashTests` | 98 (incl. 1 no-op scaffold) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
 
 `DashSharedTests` breakdown: `LocationPacketTests` (4), `RelayAdvertisementTests` (4).
 `DashRelayTests` breakdown: `LocationTrackerTests` (7), `LocationBroadcasterTests`
@@ -613,6 +726,13 @@ not replace their responsibilities.
 `DashTests` (connection/pairing-relevant): `ConnectionCoordinatorTests` (22),
 `ConnectionSetupViewTests` (8), `ConnectedControlViewTests` (2),
 `KnownDeviceStoreTests` (7), `LocationReceiverTests` (7).
+`DashTests` (map): `MapCameraStateTests` (4) + `MapViewModelTests` (3) in
+`MapCameraStateTests.swift`; `MapCoordinateBoundsTests` (4) +
+`MapViewModelContentTests` (12) in `MapContentTests.swift`;
+`DestinationStoreTests` (2) + `PlaceSearchViewModelTests` (9) in
+`PlaceSearchTests.swift`.
+(Map / search have no SDK-level tests — `GoogleMapProvider` / `GMSMapView` /
+`GooglePlaceSearchService` / `GMSPlacesClient` stay device-validated.)
 
 ---
 
@@ -646,8 +766,14 @@ not replace their responsibilities.
   - `DEVELOPMENT_TEAM = LGQX79QMNJ`, automatic signing.
   - Bundle IDs: `com.sakshamsharma.Dash`, `com.sakshamsharma.DashRelay`.
   - `DashShared` package: swift-tools 6.3, Swift 6 language mode.
-- **Google Maps SDK:** `github.com/googlemaps/ios-maps-sdk`, pinned to **11.1.0**
-  in `Package.resolved`, linked to the **Dash target only**.
+- **Google Maps SDK:** `github.com/googlemaps/ios-maps-sdk`, up-to-next-major from
+  **11.1.0** (`Package.resolved` @ 11.1.0), linked to the **Dash target only**
+  (product `GoogleMaps`).
+- **Google Places SDK:** `github.com/googlemaps/ios-places-sdk`, up-to-next-major
+  from **11.1.0** (`Package.resolved` @ 11.1.0), linked to the **Dash target
+  only** (product `GooglePlaces` — the GA Obj-C/Swift-interop SDK, **not** the
+  preview `GooglePlacesSwift`). Separate package from the Maps SDK; no shared
+  binary, no conflict. iOS 16 minimum (below the app's 18.6 target).
 
 ---
 
@@ -683,15 +809,18 @@ not replace their responsibilities.
    first-time pick. Choosing *among several known devices* is still future work
    (`pairedRelay` = the first).
 
-6. **Map abstraction shape.** `MapProvider` is `@MainActor` and returns a
-   type-erased `AnyView` (`makeMapView(camera:) -> AnyView`) so providers can be
-   held as `any MapProvider` and swapped at runtime from a future Settings
-   toggle. The spec's fuller protocol (`search`, `route`, `draw`) is intentionally
-   **not** on the protocol yet — display only.
+6. **Map abstraction shape. _(widened by item 24, 2026-09-01.)_** `MapProvider`
+   is `@MainActor` and returns a type-erased `AnyView` so providers can be held as
+   `any MapProvider` and swapped at runtime from a future Settings toggle. The
+   original signature was `makeMapView(camera:) -> AnyView`; it is now
+   `makeMapView(content: MapContent, onEvent:) -> AnyView`. The spec's `search` /
+   `route` / `draw` are still deliberately **not** on this protocol — item 24
+   records that they become their own service abstractions instead.
 
 7. **`MapCameraState` is a bespoke SDK-neutral value type** (plain `Double`s, no
    `CLLocationCoordinate2D`) rather than the spec's `CLLocationCoordinate2D`
-   signature, to keep the boundary trivially testable and import-free.
+   signature, to keep the boundary trivially testable and import-free. Item 24
+   extends the same principle to `MapCoordinate` / `MapContent` / `MapEvent`.
 
 8. **API key delivery via xcconfig → Info.plist → runtime lookup** (see §9). The
    spec says "supply the key securely"; the concrete mechanism is a git-ignored
@@ -838,6 +967,76 @@ not replace their responsibilities.
       connection state. There is **no in-place rename** yet — changing the name
       means Forget + re-pair.
 
+24. **Map "M1": widen the rendering boundary before leaning on it (2026-09-01).**
+    Purely an architecture pass on `Features/Map/` — **no new SDKs/APIs, no
+    search, no routing, no navigation, no Apple Maps, no dashboard/connection
+    changes.** Existing behaviour (vehicle marker, follow camera, `LocationPacket`
+    → `MapCameraState`, Google rendering) is unchanged.
+    - **`MapProvider` stays rendering-only and does not grow feature methods.**
+      It went from `makeMapView(camera:)` to `makeMapView(content: MapContent,
+      onEvent: @escaping (MapEvent) -> Void)` — one value in, one event closure
+      out. Search / autocomplete / place-details / route computation are recorded
+      here as **future separate service abstractions** (their own protocols +
+      Google/Apple impls), so a MapKit provider is never forced to reimplement
+      Google's Places/Routes stack and `MapProvider` never becomes a catch-all.
+    - **Small composable SDK-neutral types**, one concern each: `MapCoordinate` /
+      `MapCoordinateBounds` (`MapGeometry`), `MapCameraPlan` (`.follow` / `.fit`),
+      `MapContent` (camera + vehicle + `polylines` + `markers`), `MapPolyline` /
+      `MapMarker` (`MapOverlay`), `MapEvent` + `MapPOI` + `MapCameraPosition`
+      (`MapEvent`), `MapMode` (`cruising` / `destinationPreview` / `navigating`).
+      `DashMapView` / `MapViewModel` were **not** turned into catch-alls.
+    - **`vehicle` is separate from `camera`** in `MapContent` so navigation can
+      later offset the camera ahead of the car; today they coincide in `cruising`.
+    - **Overlay lists and non-`cruising` modes are modelled but inert** — nothing
+      produces routes or destinations yet, so `polylines` / `markers` stay empty
+      and `destinationPreview` / `navigating` fall back to `.follow`. The
+      `.fit(bounds:padding:)` camera plan and `MapCoordinateBounds([…])` exist for
+      route-preview framing but are unused.
+    - **`GoogleMapProvider` now owns a `GMSMapViewDelegate` + `MapContent`
+      diffing.** The `Coordinator` keeps keyed `GMSPolyline` / `GMSMarker`
+      dictionaries and applies only what changed between renders; delegate
+      callbacks (tap-at, tap-POI, tap-marker, `idleAt` + `willMove(byGesture:)`)
+      become `MapEvent`s. `MapViewModel.handle(_:)` is a **documented no-op seam**
+      for now.
+    - Incidentally fixed the two pre-existing `MapViewModel` main-actor-isolation
+      build warnings (the `camera: MapCameraState = .default` default args are
+      gone; the neutral value types are `nonisolated`).
+
+25. **Map "M2": destination search via a service abstraction, not the renderer
+    (2026-09-01).** Adds Google place search while keeping the search UI ours.
+    Scope held to search + destination selection — **no routing, no navigation,
+    no Apple Maps.**
+    - **`PlaceSearchService` is a separate protocol from `MapProvider`** (per
+      item 24's stated plan). Search / autocomplete / place details are not a
+      rendering concern and Apple's path (`MKLocalSearchCompleter` /
+      `MKLocalSearch`) is unrelated to Google's — so `MapProvider` never grows
+      these methods. `GooglePlaceSearchService` is the only new file importing
+      `GooglePlaces`; `GooglePlacesConfiguration` (key bootstrap) is the second,
+      mirroring the two-file `import GoogleMaps` rule.
+    - **Places SDK product choice: `GooglePlaces` (GA), not `GooglePlacesSwift`
+      (preview).** Same repo (`ios-places-sdk`), separate SPM package from the
+      Maps SDK, no binary conflict. `GMSFetchPlaceRequest`'s `placeProperties`
+      imports as `[String]` (the `NS_TYPED_EXTENSIBLE_ENUM` generic doesn't
+      bridge), so the service passes `GMSPlaceProperty.<x>.rawValue`.
+    - **One API key for both SDKs.** `GooglePlacesConfiguration.bootstrap()` reads
+      the same build-injected `GoogleMapsAPIKey` and calls
+      `GMSPlacesClient.provideAPIKey`. **"Places API (New)" must be enabled on the
+      Google Cloud project** and allowed by the key's API restrictions (§9) —
+      this is a manual console step, not done from code.
+    - **Billing session tokens handled inside the Google impl.** A
+      `GMSAutocompleteSessionToken` is minted lazily per search run and dropped
+      after `details(for:)`; the neutral protocol has no concept of a session.
+    - **Destination state is its own concern.** `DestinationStore` (SDK-neutral
+      `@MainActor ObservableObject`) holds the chosen `Destination?`.
+      `PlaceSearchViewModel` produces a `Destination` and hands it out via a
+      closure — it does not hold the store or the map. `MapViewModel.setDestination(_:)`
+      turns a `Destination?` into a `MapMarker` + a `.destinationPreview` /
+      `.fit` camera (framing vehicle + destination once; `update(with:)` then
+      leaves the camera alone). `ContentView` is the composition point wiring the
+      three, none of which reference each other.
+    - **`MapMode.destinationPreview` is now realised** (was a fall-back-to-follow
+      stub in item 24). `.navigating` still falls back.
+
 ---
 
 ## 6. Current limitations / known issues
@@ -880,12 +1079,28 @@ not replace their responsibilities.
   parsing, `setTargetRelay` connect/re-target logic, and reconnect-to-same-id
   behaviour are only exercised on device / by the `ConnectionCoordinator` stub
   tests. `RelayAdvertisement` parsing itself is unit-tested in `DashShared`.
-- **`MapViewModel.swift` has 2 build warnings** (pre-existing, unrelated to this
-  layer): `main actor-isolated static property 'default' can not be referenced
-  from a nonisolated context` at lines 24 and 28 — the `camera: MapCameraState
-  = .default` default argument. The build still succeeds. Fix belongs with a
-  Map-focused change (e.g. a convenience initializer, as `MapViewModel`'s
-  `provider:` default already uses).
+- **Partly-exercised map plumbing.** As of M2 `MapContent.markers`, the `.fit`
+  camera plan, and `MapMode.destinationPreview` are driven by a chosen
+  destination. Still inert until later milestones: `MapContent.polylines` and
+  `.navigating` (routing / nav), and every `MapEvent` case —
+  `MapViewModel.handle(_:)` is still a no-op, so a POI tap on the map does **not**
+  yet become a destination (only the search field does).
+- **No map/search UI verified on a device or simulator since M1.** The
+  `GoogleMapProvider` delegate/diffing rewrite (M1), and everything visual in M2
+  (`MapSearchView`, the destination pin, the preview camera framing), are covered
+  only by SDK-neutral unit tests + a clean build.
+- **`GooglePlaceSearchService` has never made a real Places API call.** Autocomplete
+  request shape, suggestion field mapping (`attributedPrimaryText` etc.),
+  `GMSFetchPlaceRequest` property strings, session-token behaviour, and error
+  mapping are all coded to the 11.1.0 headers but unverified against the live
+  service. **"Places API (New)" is not confirmed enabled** in the developer's
+  Google Cloud project (§9).
+- **Debounce + async search timing is only lightly covered.** Tests use a
+  `.zero` debounce and `await` the pending task; real rapid typing / cancellation
+  behaviour on device isn't proven.
+- **`GooglePlacesSwift` (preview) is downloaded but unused.** The `ios-places-sdk`
+  SPM package vends both `GooglePlaces` and `GooglePlacesSwift`; only the former
+  is linked, but SwiftPM still fetches both xcframeworks.
 - **Landscape-primary not configured.** All four iPad orientations are currently
   allowed; the "landscape is primary" intent isn't reflected in Info.plist.
 - **End-to-end transfer is not covered by automated tests.** It has been
@@ -950,8 +1165,20 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
   implementation. See §10 for exactly what this touches.
 - **[Planned]** `SettingsView` + `SettingsStore` — map-provider toggle persisted
   in `UserDefaults`.
-- **[Planned]** Map layer depth: `search` (Places API) and, later,
-  `route`/`draw` (Directions/Routes, call-once-per-trip) — extend `MapProvider`.
+- **[Implemented]** Map rendering boundary for overlays + events + modes
+  (§5 item 24): `MapContent`, `MapEvent`, `MapMode`, `MapCameraPlan.fit`.
+  `.markers` / `.fit` / `.destinationPreview` are now driven by M2; `.polylines`
+  and `MapEvent` consumption still await routing / navigation.
+- **[Implemented]** Destination search (§5 item 25): `PlaceSearchService` +
+  `GooglePlaceSearchService` (Places SDK), `PlaceSearchViewModel`,
+  `DestinationStore`, `MapSearchView`, `MapViewModel.setDestination(_:)`.
+  Needs "Places API (New)" enabled (§9) and on-device verification (§6).
+- **[Planned]** Map layer depth, remaining: **`RoutingService`** (route once per
+  trip — Routes API), a **separate protocol** from `MapProvider` and
+  `PlaceSearchService`, Google impl then Apple impl. Then a provider-neutral
+  guidance engine driven by `LocationStore` + the cached route. Also: turning a
+  map POI tap (`MapEvent.tappedPOI`) into a destination. (See the map-roadmap
+  investigation; not started.)
 - **[Planned]** Dock-style row of favourite/frequent destinations.
 - **[Future idea]** Weather widget (WeatherKit free tier).
 - **[Future idea]** Parking-location auto-pin on Bluetooth disconnect.
@@ -986,6 +1213,18 @@ Roughly in order (adapts the spec §11 build order to where we are):
    km/h, `TripStats`).
 6. **Music** — MusicKit catalog search + custom player.
 7. **`AppleMapProvider` + Settings toggle** — second provider, persisted choice.
+
+Map-feature sub-track (independent of the above ordering; **M1 + M2 done**):
+- **M1 [done]** — widen the rendering boundary for overlays / events / modes
+  (§5 item 24).
+- **M2 [done]** — `PlaceSearchService` + Google impl, `PlaceSearchViewModel` /
+  `DestinationStore`, custom `MapSearchView`, destination pin + preview camera
+  (§5 item 25). Remaining before it's trusted: enable "Places API (New)" (§9) and
+  verify on device (§6).
+- **M3** — `RoutingService` (Routes API, once per trip) + route polyline on the
+  map via the M1 overlay channel; reuse the M2 destination.
+- **M4** — provider-neutral guidance engine (maneuver card, off-route detection,
+  navigation camera) driven by `LocationStore` + the cached route.
 8. **Polish pass** — `ThemeManager`, idle-timer disable, hide iPadOS chrome,
    favourites dock, landscape-primary orientation config.
 
@@ -1000,7 +1239,10 @@ Roughly in order (adapts the spec §11 build order to where we are):
   → `Dash/Dash/Info.plist` key `GoogleMapsAPIKey = $(GOOGLE_MAPS_API_KEY)`
   → `GoogleMapsConfiguration.apiKey` reads it from the bundle at runtime
   → `GoogleMapsConfiguration.bootstrap()` calls `GMSServices.provideAPIKey(_:)`
-  (invoked from `DashApp.init()` and the `ContentView` preview).
+  **and** `GooglePlacesConfiguration.bootstrap()` calls
+  `GMSPlacesClient.provideAPIKey(_:)` with the **same** key (one key covers every
+  Google Maps Platform API for this bundle). Both invoked from `DashApp.init()`
+  and the `ContentView` preview.
 - `Dash/Config/GoogleMapsService.xcconfig` is **git-ignored** (`.gitignore` at
   repo root). It is wired as the `baseConfigurationReference` for the Dash target's
   Debug and Release configs.
@@ -1015,11 +1257,34 @@ Roughly in order (adapts the spec §11 build order to where we are):
   it ever leaks, rotate it in Google Cloud console. Consider a $1 billing budget
   alert (spec §5) and per-app-bundle-ID / API restrictions on the key.
 
-### Google Maps cost discipline (spec §5, relevant once search/routes land)
+### Google Cloud — required for M2 (destination search)  ⚠️ NOT yet confirmed done
 
-- Maps SDK map view: free/unlimited. Places (search): free ≤ 10k calls/month.
-- Directions/Routes: billed **per request** — call once per trip, never on a
-  timer; track against the cached route locally.
+The Places SDK calls fail until this is set up in the Google Cloud console for
+the project that owns the existing Maps key:
+
+1. **Enable the "Places API (New)" API** (APIs & Services → Library → "Places API
+   (New)" → Enable). This is distinct from the legacy "Places API". The Maps SDK
+   for iOS API is already enabled.
+2. **Widen the API key's "API restrictions"** to also allow **Places API (New)**
+   (Credentials → the iOS key → API restrictions). Keep the existing iOS
+   bundle-ID application restriction (`com.sakshamsharma.Dash`) — the Places SDK
+   sends the bundle id, so no new key is needed.
+3. No new Info.plist keys, entitlements, or usage strings are required for
+   search. (Routing later will additionally need the Routes API enabled.)
+
+Until step 1+2 are done, autocomplete / details requests return an error and
+`PlaceSearchViewModel` shows its generic "Couldn't search" text.
+
+### Google Maps cost discipline (spec §5)
+
+- Maps SDK map view: free/unlimited.
+- Places **Autocomplete**: free ≤ 10k requests/month; a `GMSAutocompleteSessionToken`
+  groups a keystroke run + the details fetch into one cheaper billing session
+  (the Google impl already does this). Comfortably free at single-user volume.
+- Places **Details (New)**: billed per field group; one call per chosen
+  destination — negligible at this volume.
+- Directions/Routes (later): billed **per request** — call once per trip, never
+  on a timer; track against the cached route locally.
 
 ### Signing / distribution
 
@@ -1042,6 +1307,8 @@ Git history on `main` (newest first):
 
 | Commit | Milestone |
 |---|---|
+| *(working tree, uncommitted)* | **Map "M2": destination search** (search + destination selection only — no routing, navigation, or Apple Maps; dashboard / connection / relay untouched). Adds the **Google Places SDK** (`GooglePlaces` product, `ios-places-sdk` SPM, up-to-next-major from 11.1.0, Dash target only). New **`PlaceSearchService`** protocol — deliberately separate from `MapProvider` — with `GooglePlaceSearchService` (the only new `import GooglePlaces` file besides `GooglePlacesConfiguration`): autocomplete + Place Details (New) + one lazy `GMSAutocompleteSessionToken` per run, GMS errors mapped to `PlaceSearchError`. SDK-free: `Destination` / `PlaceSuggestion`, `DestinationStore` (source of truth for the chosen `Destination?`), `PlaceSearchViewModel` (debounce → suggestions → `resolve` → `onDestinationChosen`), custom `MapSearchView` (field + list + selected-destination chip). `MapViewModel.setDestination(_:)` drops a `MapMarker`, frames vehicle + destination via `MapCameraPlan.fit`, and toggles `.destinationPreview` ⟷ `.cruising`. `ContentView` composes map + search + store (none reference each other). `GooglePlacesConfiguration.bootstrap()` reuses the Maps key. Tests: new `PlaceSearchTests` (11), `MapContentTests` +6 (16 total). Build clean; full `DashTests` green (98). **Requires "Places API (New)" enabled in Google Cloud (§9) — not confirmed done. No on-device verification.** §5 item 25. |
+| *(working tree, uncommitted)* | **Map "M1": widen the rendering boundary** (architecture only — no new SDKs/APIs, no search/routing/navigation/Apple Maps, no dashboard/connection changes; existing behaviour preserved). `MapProvider` goes from `makeMapView(camera:)` to `makeMapView(content: MapContent, onEvent:)` — SDK-neutral render state in, `MapEvent` out — and is kept **rendering-only** (search/routing become separate service abstractions later). New small SDK-neutral types: `MapGeometry` (`MapCoordinate`, `MapCoordinateBounds`), `MapCameraPlan` (`.follow` / `.fit`), `MapContent` (camera / vehicle / polylines / markers), `MapOverlay` (`MapPolyline`, `MapMarker`), `MapEvent` (+ `MapPOI`, `MapCameraPosition`), `MapMode`. `MapViewModel` gains `mode` / `setMode` / `handle(_:)` (no-op seam) and assembles `MapContent`. `GoogleMapProvider` becomes a `GMSMapViewDelegate` with `MapContent` diffing + keyed overlay dicts; still the only `import GoogleMaps` Map file. Fixed the two pre-existing `MapViewModel` main-actor warnings. Tests: new `MapContentTests` (10 — `MapCoordinateBounds` math + `MapViewModel` content/mode); existing `MapCameraStateTests` / `MapViewModelTests` unchanged and green. Build clean; full `DashTests` green (82). §5 item 24. |
 | *(working tree, uncommitted)* | **physical-device discovery fix + connection UX refinement.** Discovery fix: `LocationReceiver`'s `NWBrowser` now uses `.bonjourWithTXTRecord(type:domain:)` instead of PTR-only `.bonjour(...)` — on device the plain descriptor delivered every result with `metadata == .none`, so the identity TXT never reached Dash (first-time pair now works iPhone↔iPad over Personal Hotspot). Testable seam `LocationReceiver.txtEntries(from:)` + `LocationReceiverTests` (7, incl. nil-metadata). UX (§5 decision 23): "Disconnect" while searching → **"Stop Searching"**; new `ConnectedControlView` overlay gives **Disconnect / Forget `<name>`** while connected (attached in `RootView`, not `ContentView`); DashRelay `.waiting` gains **"Stop Sharing"**; `pairAndConnect(to:named:)` stores a user-typed friendly name (**stable `id` untouched**) from a "Name this iPhone" alert, surfaced via `pairedRelayDisplayName`. Temporary `[DISCOVERY-DIAG]` `os.Logger` lines kept in `LocationReceiver` / `ConnectionCoordinator` pending a removal pass. Tests: `ConnectionCoordinatorTests` (22), `ConnectionSetupViewTests` (8), new `ConnectedControlViewTests` (2), `RelayStatusViewTests` (6). All green — DashShared 8, DashRelay 32, Dash 71. |
 | *(working tree, uncommitted)* | **first real Dash ↔ DashRelay pairing flow** — `DashShared` gains `RelayAdvertisement` (Bonjour TXT-record contract: stable `rid` + `name`). DashRelay: `RelayIdentity` mints/persists a per-install UUID; `LocationBroadcaster` publishes it in the service's TXT record (service name falls back to `"DashRelay"`). Dash: `LocationReceiver` reads each result's TXT record, reports the visible set via `onDiscoveryChange → [DiscoveredRelay]`, and connects **only** to the relay named by `setTargetRelay(id:)` — reconnecting only to that id, never "results.first". `KnownRelay` re-keyed to the stable id; `KnownDeviceStore` gains `pairedRelay`. `ConnectionCoordinator` now holds an injected `KnownDeviceStoring`, adds `discoveredRelays` / `connectedRelayID` / `connectedDisplayName` / `offerableRelays` / `pairedRelayName` and `pairAndConnect(to:)` / `forgetPairedRelay()`; auto-connects only to a *known* relay, never a stranger; Disconnect keeps the pairing, Forget removes it and returns to first-time browsing. `ConnectionSetupView` becomes a `Model`-driven picker + "Looking for `<name>`…" + a plain "Forget this iPhone" button. New/expanded tests: `RelayAdvertisementTests` (4), `RelayIdentityTests` (4), `LocationBroadcasterTests` (+2), `ConnectionCoordinatorTests` (18), `KnownDeviceStoreTests` (7, adapted), `ConnectionSetupViewTests` (8). All suites green (DashShared 8, DashRelay 31, Dash 63). **Pairing not yet verified device-to-device.** Device-identity rationale recorded in §5 decision 19. |
 | *(working tree, uncommitted)* | **first DashRelay connection/status UI** — `RelayStatusScreen` (container, reads `RelaySessionController`) + `RelayStatusView` (presentational, `State` + `onStart`/`onDisconnect` closures) in a new `DashRelay/Features/Status/` folder. Startup/waiting screen (`stopped` → Start; `waiting` → "Ready to Connect" + spinner) and a connected screen (`connected` → Disconnect, wired to the existing `RelaySessionController.stop()`). Connected screen shows a **generic** message — no device name, because the session layer does not expose a client name. `DashRelayApp` root swapped to `RelayStatusScreen`; `DashRelay/ContentView.swift` scaffold removed. New `RelayStatusViewTests` (5). `waiting` state rendered on the iPhone simulator, portrait + landscape. No pairing controls. |
@@ -1065,7 +1332,9 @@ Git history on `main` (newest first):
 - **iPhone → iPad location transfer over Bonjour/TCP** — confirmed on physical
   devices by the developer (manual, pre-dates this repo's automated suite).
 - **Google Maps renders in Dash** — confirmed in the iOS Simulator (map tiles +
-  vehicle marker, SDK authenticated with the configured key).
+  vehicle marker, SDK authenticated with the configured key). **Predates the M1
+  `GoogleMapProvider` rewrite** — the delegate/diffing rewrite builds clean but
+  has not been re-run on a simulator/device.
 - **Connection gate reaches `.connected` against a real relay** — confirmed in
   the iOS Simulator: Dash discovered a live DashRelay on the LAN, ran
   `discovering → connecting → connected`, and `RootView` swapped to the dashboard.
@@ -1084,3 +1353,9 @@ Git history on `main` (newest first):
   Forget-removes-pairing behaviours are all covered by the Swift Testing suites
   and nothing else. **Not** run device-to-device and **not** re-rendered in the
   simulator this round.
+- **Map M1 + M2 — automated only.** The M1 `GoogleMapProvider` rewrite and all of
+  M2 (destination search, `MapSearchView`, the destination pin + preview camera,
+  `GooglePlaceSearchService` against the live Places API) are covered only by
+  SDK-neutral Swift Testing suites + a clean build. Nothing map-related has been
+  run on a device or simulator since the pre-M1 "map + vehicle marker renders"
+  check.

@@ -2,9 +2,13 @@
 //  MapViewModel.swift
 //  Dash
 //
-//  Drives the active map provider (spec §4). It transforms location that is fed in
-//  from outside into `MapCameraState` and holds the provider selection. It does NOT
-//  own or duplicate `LocationStore` — no GPS, no networking, no watchdog here.
+//  Drives the active map provider (spec §4). It owns the SDK-neutral render state
+//  (`MapContent`) and the current `MapMode`, transforms location fed in from
+//  outside into a camera, and routes `MapEvent`s coming back from the map.
+//
+//  It does NOT own or duplicate `LocationStore` or `DestinationStore` — no GPS,
+//  no networking, no watchdog here, and it holds no SDK types. Location arrives
+//  via `update(with:)`; the chosen destination arrives via `setDestination(_:)`.
 //
 
 import Combine
@@ -14,26 +18,112 @@ import Foundation
 @MainActor
 final class MapViewModel: ObservableObject {
 
+    /// Inset (points) around the vehicle + destination when previewing.
+    static let previewPadding: Double = 72
+
     /// The active backend. Reassign to switch providers (e.g. from Settings);
     /// nothing else in the dashboard changes.
     @Published var provider: any MapProvider
 
-    /// The camera the map is currently showing. Updated only via `update(with:)`.
-    @Published private(set) var camera: MapCameraState
+    /// Everything the provider should render right now. Rebuilt from the retained
+    /// camera + latest vehicle position + mode + destination.
+    @Published private(set) var content: MapContent
 
-    convenience init(camera: MapCameraState = .default) {
-        self.init(provider: GoogleMapProvider(), camera: camera)
+    /// What the map is currently for. Drives camera derivation.
+    @Published private(set) var mode: MapMode
+
+    /// The retained vehicle-follow camera. Kept across fixes so zoom / heading
+    /// persist; in `.cruising` this is what the map shows. Not view state — it is
+    /// an input to `content`, which is what the view observes.
+    private(set) var camera: MapCameraState
+
+    /// The chosen destination, mirrored here for camera math. `DestinationStore`
+    /// remains the source of truth; this is set only via `setDestination(_:)`.
+    private(set) var destination: Destination?
+
+    convenience init() {
+        self.init(provider: GoogleMapProvider())
     }
 
-    init(provider: any MapProvider, camera: MapCameraState = .default) {
+    init(provider: any MapProvider) {
         self.provider = provider
-        self.camera = camera
+        self.mode = .cruising
+        self.camera = .default
+        self.content = MapContent(
+            camera: .follow(.default),
+            vehicle: MapCameraState.default.center
+        )
     }
 
     /// Feed in the latest known location. The caller owns `LocationStore`; this
-    /// only re-centres the camera. `nil` (no fix yet) leaves the camera as-is.
+    /// re-centres the follow camera and moves the vehicle. `nil` (no fix yet)
+    /// leaves everything as-is. While previewing a destination the camera is left
+    /// framed on the preview — only the vehicle marker moves.
     func update(with packet: LocationPacket?) {
         guard let packet else { return }
         camera = camera.following(packet)
+        content.vehicle = MapCoordinate(latitude: packet.latitude, longitude: packet.longitude)
+        if mode != .destinationPreview {
+            content.camera = .follow(camera)
+        }
+    }
+
+    /// Switch what the map is for. Camera is re-derived immediately.
+    func setMode(_ newMode: MapMode) {
+        guard newMode != mode else { return }
+        mode = newMode
+        content.camera = cameraPlan()
+    }
+
+    /// Show (or clear) the chosen destination. A destination drops a pin, frames
+    /// the vehicle + destination, and enters `.destinationPreview`; `nil` removes
+    /// the pin and returns to vehicle-following `.cruising`.
+    func setDestination(_ destination: Destination?) {
+        self.destination = destination
+
+        if let destination {
+            content.markers = [
+                MapMarker(
+                    id: destination.placeID,
+                    coordinate: destination.coordinate,
+                    title: destination.name.isEmpty ? nil : destination.name
+                )
+            ]
+            mode = .destinationPreview
+        } else {
+            content.markers = []
+            mode = .cruising
+        }
+        content.camera = cameraPlan()
+    }
+
+    /// Interaction coming back from the rendered map. The channel is SDK-neutral;
+    /// consumers (routing, "recenter", off-route detection) are wired in later
+    /// milestones, so today these cases only document intent.
+    func handle(_ event: MapEvent) {
+        switch event {
+        case .tappedMap, .tappedPOI, .tappedMarker:
+            break // routing milestone: turn a tap into a destination
+        case .cameraIdle:
+            break // navigation milestone: drop out of follow when the user pans
+        }
+    }
+
+    /// Camera intent for the current mode. `.destinationPreview` frames the
+    /// vehicle + destination once; `update(with:)` then leaves it alone so the
+    /// view doesn't jump on every fix.
+    private func cameraPlan() -> MapCameraPlan {
+        switch mode {
+        case .cruising, .navigating:
+            return .follow(camera)
+        case .destinationPreview:
+            guard
+                let destination,
+                let bounds = MapCoordinateBounds([content.vehicle, destination.coordinate])
+            else {
+                return .follow(camera)
+            }
+            return .fit(bounds, padding: Self.previewPadding)
+        }
     }
 }
