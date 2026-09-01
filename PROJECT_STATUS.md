@@ -4,38 +4,22 @@ Living status document for **Dash**. It describes the repository as it actually
 stands so a future developer (or a fresh Claude Code session) can get oriented
 without conversation history.
 
-- **Last updated:** 2026-09-01
+- **Last updated:** 2026-09-02
 - **Branch:** `main`
-- **Latest commit:** `9ccf6e0 feat(connection): add setup screen` (the DashRelay
-  status UI and this pairing work are in the working tree, not yet committed)
-- **Working tree (not yet committed as of this update):**
-  1. the **first DashRelay connection/status UI** (`RelayStatusScreen` /
-     `RelayStatusView` — §3 "DashRelay", §5 item 18);
-  2. the **first real pairing flow** between Dash and DashRelay — a stable relay
-     identity in the Bonjour TXT record, discover-then-pick for first-time setup,
-     auto-prefer the paired relay on later launches, and a Forget capability
-     (§3, §5 items 19–22, §10);
-  3. the **physical-device discovery fix** (`NWBrowser` →
-     `.bonjourWithTXTRecord`) — first-time pairing now confirmed working
-     iPhone↔iPad on hardware — plus temporary `[DISCOVERY-DIAG]` logging still to
-     be removed (§3 "End-to-end", §10);
-  4. a **connection UX refinement** — "Stop Searching", a disconnect/forget
-     control on the dashboard while connected, DashRelay "Stop Sharing", and a
-     friendly name captured at pairing (§5 item 23, §10).
-  5. the **Map "M1" architecture widening** — the map-rendering boundary now
-     carries a full SDK-neutral render state (`MapContent`: camera plan, vehicle,
-     polylines, markers) in and a `MapEvent` stream (map/POI/marker taps,
-     camera-idle) out, plus a `MapMode` and a bounds-fit camera plan. No new
-     SDKs, no search/routing/navigation — scaffolding only (§3 "Map abstraction",
-     §5 item 24, §10).
-  6. the **Map "M2" destination search** — Google **Places SDK** for iOS added
-     (`GooglePlaces`, SPM), a provider-neutral `PlaceSearchService` +
-     `GooglePlaceSearchService`, an SDK-free `PlaceSearchViewModel` +
-     `DestinationStore` + `Destination` / `PlaceSuggestion`, a custom
-     `MapSearchView`, and `MapViewModel.setDestination(_:)` (pin +
-     frame-vehicle-and-destination + `.destinationPreview`). No routing / no
-     navigation / no Apple Maps. **Needs "Places API (New)" enabled in Google
-     Cloud** (§9). (§3 "Map — search", §5 item 25, §9, §10).
+- **Latest commit:** `973ffc9 feat(map): add destination search` — the Map **M1**
+  (rendering-boundary widening) and **M2** (destination search) work is committed
+  here, along with the search-result-row contrast fix below.
+- **Everything through M2 is committed.** The connection/pairing/relay-status work
+  (previously "working tree" in this doc) landed in `9a02364` / `ec4d4a9` /
+  `c3a3a18`; the Map M1 + M2 work landed in `973ffc9`. See §10 for the mapping.
+- **Most recent follow-up (in `973ffc9`):** on-device testing of M2 autocomplete
+  showed the suggestion-row **secondary line and trailing distance were invisible**
+  — `.foregroundStyle(.secondary)` / `.tertiary` are translucent and wash out
+  against `MapSearchView`'s `.regularMaterial` card over the bright map. Both
+  changed to an explicit opaque `Color(uiColor: .systemGray)` in `MapSearchView`
+  (styling only — no layout, data, or SDK change). Google autocomplete and
+  `GooglePlaceSearchService`'s field mapping were confirmed correct on device via
+  temporary logging (since removed).
 - **Authoritative requirements:** `PROJECT_SPEC.pdf` (repo root) — "iPad CarPlay-style Dashboard — Project Spec"
 - **Day-to-day guidance:** `CLAUDE.md` (repo root)
 
@@ -673,12 +657,19 @@ not replace their responsibilities.
   out nothing, `reset` clears. **Google's SDK is not exercised** — a stub stands in.
 - **[Verified · on device / simulator]** Dash builds (clean, no warnings). Before
   the M1 pass it launched, initialised the Google Maps SDK (v11.1.0), and
-  rendered the map + vehicle marker. **Not re-verified on a device/simulator
-  since M1:** the `GoogleMapProvider` delegate/diffing rewrite (M1) and **all of
-  M2** — `GooglePlaceSearchService` against the live Places API, the
-  `MapSearchView` UI, the destination pin / preview camera on a real map, and
-  `GMSPlacesClient.provideAPIKey` — are unit-covered on the SDK-neutral side only
-  (see §6).
+  rendered the map + vehicle marker.
+- **[Verified · on device]** M2 autocomplete on the physical iPad:
+  `GooglePlaceSearchService.suggestions(...)` against the live **Places API (New)**
+  returns real origin-biased results (`GMSPlacesClient.provideAPIKey` is working,
+  the key is authorised for Places), `mapSuggestion`'s field mapping
+  (`attributedPrimaryText` / `attributedSecondaryText` / `attributedFullText` /
+  `distanceMeters`) is correct, and `MapSearchView`'s suggestion list renders.
+  One styling bug fixed as part of this (secondary line + distance were invisible
+  — see the header note and §6). **Still not device-verified:** choosing a
+  suggestion → `details(for:)` Place Details resolve → `Destination`, the
+  destination pin dropping on the map, and the `.destinationPreview` camera
+  framing. The `GoogleMapProvider` delegate/diffing rewrite (M1) is also still
+  only unit-covered + clean-build (see §6).
 
 ### End-to-end
 
@@ -702,22 +693,25 @@ not replace their responsibilities.
   arrived with `metadata == .none` and the identity TXT record never reached
   Dash — the browser now uses **`.bonjourWithTXTRecord(type:domain:)`**
   (`LocationReceiver`; `LocationReceiverTests` covers the metadata → advertisement
-  parse incl. the nil-metadata case). Temporary `[DISCOVERY-DIAG]` `os.Logger`
-  lines are still present in `LocationReceiver` / `ConnectionCoordinator` pending
-  a final removal pass.
+  parse incl. the nil-metadata case). The `[DISCOVERY-DIAG]` `os.Logger` lines
+  used while debugging this on hardware were removed before commit — **no
+  diagnostic logging is in the source.**
 - **[NOT verified on hardware]** Still only automated-verified: auto-preferring
   the paired relay on a *later* launch, "Looking for `<name>`…" when it's absent,
   Disconnect, Forget, "Stop Searching", DashRelay "Stop Sharing", the "name this
   iPhone" prompt, and `ConnectedControlView`. Two physical relays being
   disambiguated is also unverified.
 
-### Automated test totals (all passing, 2026-09-01)
+### Automated test totals (all passing, 2026-09-02)
 
 | Suite | Tests | Runner |
 |---|---:|---|
 | `DashSharedTests` | 8 | `swift test` |
 | `DashRelayTests` | 32 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
-| `DashTests` | 98 (incl. 1 no-op scaffold) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+| `DashTests` | 104 (per the Xcode test plan; incl. 1 no-op scaffold) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+
+Last full run (`xcodebuild test -scheme Dash -only-testing:DashTests`, iPad
+simulator, 2026-09-02): all pass, build clean with no warnings.
 
 `DashSharedTests` breakdown: `LocationPacketTests` (4), `RelayAdvertisementTests` (4).
 `DashRelayTests` breakdown: `LocationTrackerTests` (7), `LocationBroadcasterTests`
@@ -1020,9 +1014,10 @@ not replace their responsibilities.
       bridge), so the service passes `GMSPlaceProperty.<x>.rawValue`.
     - **One API key for both SDKs.** `GooglePlacesConfiguration.bootstrap()` reads
       the same build-injected `GoogleMapsAPIKey` and calls
-      `GMSPlacesClient.provideAPIKey`. **"Places API (New)" must be enabled on the
-      Google Cloud project** and allowed by the key's API restrictions (§9) —
-      this is a manual console step, not done from code.
+      `GMSPlacesClient.provideAPIKey`. "Places API (New)" must be enabled on the
+      Google Cloud project and allowed by the key's API restrictions — a manual
+      console step, not done from code. **This is done and confirmed working on
+      device** (§9).
     - **Billing session tokens handled inside the Google impl.** A
       `GMSAutocompleteSessionToken` is minted lazily per search run and dropped
       after `details(for:)`; the neutral protocol has no concept of a session.
@@ -1085,16 +1080,17 @@ not replace their responsibilities.
   `.navigating` (routing / nav), and every `MapEvent` case —
   `MapViewModel.handle(_:)` is still a no-op, so a POI tap on the map does **not**
   yet become a destination (only the search field does).
-- **No map/search UI verified on a device or simulator since M1.** The
-  `GoogleMapProvider` delegate/diffing rewrite (M1), and everything visual in M2
-  (`MapSearchView`, the destination pin, the preview camera framing), are covered
-  only by SDK-neutral unit tests + a clean build.
-- **`GooglePlaceSearchService` has never made a real Places API call.** Autocomplete
-  request shape, suggestion field mapping (`attributedPrimaryText` etc.),
-  `GMSFetchPlaceRequest` property strings, session-token behaviour, and error
-  mapping are all coded to the 11.1.0 headers but unverified against the live
-  service. **"Places API (New)" is not confirmed enabled** in the developer's
-  Google Cloud project (§9).
+- **M2 autocomplete is device-verified; the rest of the map/search UI is not.**
+  On the physical iPad, `GooglePlaceSearchService.suggestions(...)` +
+  `mapSuggestion` field mapping + the `MapSearchView` suggestion list are
+  confirmed working against the live **Places API (New)** (§3). Still only
+  unit-covered + clean-build: `details(for:)` Place Details resolve, the
+  destination pin, the `.destinationPreview` camera framing, and the
+  `GoogleMapProvider` delegate/diffing rewrite (M1).
+- **`GMSFetchPlaceRequest` / Place Details (New) is still unverified against the
+  live service.** The property strings, session-token hand-off from autocomplete,
+  and error mapping are coded to the 11.1.0 headers; only autocomplete has been
+  exercised on device so far.
 - **Debounce + async search timing is only lightly covered.** Tests use a
   `.zero` debounce and `await` the pending task; real rapid typing / cancellation
   behaviour on device isn't proven.
@@ -1172,7 +1168,8 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
 - **[Implemented]** Destination search (§5 item 25): `PlaceSearchService` +
   `GooglePlaceSearchService` (Places SDK), `PlaceSearchViewModel`,
   `DestinationStore`, `MapSearchView`, `MapViewModel.setDestination(_:)`.
-  Needs "Places API (New)" enabled (§9) and on-device verification (§6).
+  "Places API (New)" is enabled and autocomplete is device-verified (§3);
+  Place Details resolve + pin + preview camera are still device-unverified (§6).
 - **[Planned]** Map layer depth, remaining: **`RoutingService`** (route once per
   trip — Routes API), a **separate protocol** from `MapProvider` and
   `PlaceSearchService`, Google impl then Apple impl. Then a provider-neutral
@@ -1192,12 +1189,12 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
 Roughly in order (adapts the spec §11 build order to where we are):
 
 1. **Finish device verification of the connection UX.** First-time pair is
-   confirmed on hardware. Still to check on device: auto-prefer the paired relay
-   across a DashRelay relaunch, "Looking for `<name>`…" when it's absent,
-   Disconnect / Forget / "Stop Searching" / DashRelay "Stop Sharing", the "name
-   this iPhone" prompt, `ConnectedControlView` in both orientations, and two
-   physical relays being disambiguated. Then **remove the `[DISCOVERY-DIAG]`
-   logging** (§3 "End-to-end").
+   confirmed on hardware (no diagnostic logging remains in the source).
+   Still to check on device: auto-prefer the paired relay across a DashRelay
+   relaunch, "Looking for `<name>`…" when it's absent, Disconnect / Forget /
+   "Stop Searching" / DashRelay "Stop Sharing", the "name this iPhone" prompt,
+   `ConnectedControlView` in both orientations, and two physical relays being
+   disambiguated.
 2. **Connection UI, continued.** A "GPS signal lost" overlay driven by
    `LocationStore.signal`, keep the dashboard visible during brief incidental
    drops (only fall back to setup after a sustained/deliberate disconnect), a
@@ -1219,8 +1216,9 @@ Map-feature sub-track (independent of the above ordering; **M1 + M2 done**):
   (§5 item 24).
 - **M2 [done]** — `PlaceSearchService` + Google impl, `PlaceSearchViewModel` /
   `DestinationStore`, custom `MapSearchView`, destination pin + preview camera
-  (§5 item 25). Remaining before it's trusted: enable "Places API (New)" (§9) and
-  verify on device (§6).
+  (§5 item 25). "Places API (New)" is enabled; autocomplete + the suggestion list
+  are device-verified. Still to check on device: choosing a suggestion (Place
+  Details resolve), the pin, and the preview camera (§6).
 - **M3** — `RoutingService` (Routes API, once per trip) + route polyline on the
   map via the M1 overlay channel; reuse the M2 destination.
 - **M4** — provider-neutral guidance engine (maneuver card, off-route detection,
@@ -1257,23 +1255,22 @@ Map-feature sub-track (independent of the above ordering; **M1 + M2 done**):
   it ever leaks, rotate it in Google Cloud console. Consider a $1 billing budget
   alert (spec §5) and per-app-bundle-ID / API restrictions on the key.
 
-### Google Cloud — required for M2 (destination search)  ⚠️ NOT yet confirmed done
+### Google Cloud — required for M2 (destination search)  ✅ confirmed working
 
-The Places SDK calls fail until this is set up in the Google Cloud console for
-the project that owns the existing Maps key:
+Confirmed on the physical iPad (2026-09-02): autocomplete requests against
+**Places API (New)** succeed with the existing Maps key, so in the developer's
+Google Cloud project:
 
-1. **Enable the "Places API (New)" API** (APIs & Services → Library → "Places API
-   (New)" → Enable). This is distinct from the legacy "Places API". The Maps SDK
-   for iOS API is already enabled.
-2. **Widen the API key's "API restrictions"** to also allow **Places API (New)**
-   (Credentials → the iOS key → API restrictions). Keep the existing iOS
-   bundle-ID application restriction (`com.sakshamsharma.Dash`) — the Places SDK
-   sends the bundle id, so no new key is needed.
-3. No new Info.plist keys, entitlements, or usage strings are required for
-   search. (Routing later will additionally need the Routes API enabled.)
+1. **"Places API (New)" is enabled** (distinct from the legacy "Places API"). The
+   Maps SDK for iOS API was already enabled.
+2. **The iOS API key's "API restrictions" allow Places API (New)**, keeping the
+   existing bundle-ID application restriction (`com.sakshamsharma.Dash`). No new
+   key was needed.
+3. No new Info.plist keys, entitlements, or usage strings are required for search.
+   (Routing later will additionally need the **Routes API** enabled — not yet done.)
 
-Until step 1+2 are done, autocomplete / details requests return an error and
-`PlaceSearchViewModel` shows its generic "Couldn't search" text.
+If Places access were ever revoked, autocomplete / details requests return an
+error and `PlaceSearchViewModel` shows its generic "Couldn't search" text.
 
 ### Google Maps cost discipline (spec §5)
 
@@ -1307,11 +1304,11 @@ Git history on `main` (newest first):
 
 | Commit | Milestone |
 |---|---|
-| *(working tree, uncommitted)* | **Map "M2": destination search** (search + destination selection only — no routing, navigation, or Apple Maps; dashboard / connection / relay untouched). Adds the **Google Places SDK** (`GooglePlaces` product, `ios-places-sdk` SPM, up-to-next-major from 11.1.0, Dash target only). New **`PlaceSearchService`** protocol — deliberately separate from `MapProvider` — with `GooglePlaceSearchService` (the only new `import GooglePlaces` file besides `GooglePlacesConfiguration`): autocomplete + Place Details (New) + one lazy `GMSAutocompleteSessionToken` per run, GMS errors mapped to `PlaceSearchError`. SDK-free: `Destination` / `PlaceSuggestion`, `DestinationStore` (source of truth for the chosen `Destination?`), `PlaceSearchViewModel` (debounce → suggestions → `resolve` → `onDestinationChosen`), custom `MapSearchView` (field + list + selected-destination chip). `MapViewModel.setDestination(_:)` drops a `MapMarker`, frames vehicle + destination via `MapCameraPlan.fit`, and toggles `.destinationPreview` ⟷ `.cruising`. `ContentView` composes map + search + store (none reference each other). `GooglePlacesConfiguration.bootstrap()` reuses the Maps key. Tests: new `PlaceSearchTests` (11), `MapContentTests` +6 (16 total). Build clean; full `DashTests` green (98). **Requires "Places API (New)" enabled in Google Cloud (§9) — not confirmed done. No on-device verification.** §5 item 25. |
-| *(working tree, uncommitted)* | **Map "M1": widen the rendering boundary** (architecture only — no new SDKs/APIs, no search/routing/navigation/Apple Maps, no dashboard/connection changes; existing behaviour preserved). `MapProvider` goes from `makeMapView(camera:)` to `makeMapView(content: MapContent, onEvent:)` — SDK-neutral render state in, `MapEvent` out — and is kept **rendering-only** (search/routing become separate service abstractions later). New small SDK-neutral types: `MapGeometry` (`MapCoordinate`, `MapCoordinateBounds`), `MapCameraPlan` (`.follow` / `.fit`), `MapContent` (camera / vehicle / polylines / markers), `MapOverlay` (`MapPolyline`, `MapMarker`), `MapEvent` (+ `MapPOI`, `MapCameraPosition`), `MapMode`. `MapViewModel` gains `mode` / `setMode` / `handle(_:)` (no-op seam) and assembles `MapContent`. `GoogleMapProvider` becomes a `GMSMapViewDelegate` with `MapContent` diffing + keyed overlay dicts; still the only `import GoogleMaps` Map file. Fixed the two pre-existing `MapViewModel` main-actor warnings. Tests: new `MapContentTests` (10 — `MapCoordinateBounds` math + `MapViewModel` content/mode); existing `MapCameraStateTests` / `MapViewModelTests` unchanged and green. Build clean; full `DashTests` green (82). §5 item 24. |
-| *(working tree, uncommitted)* | **physical-device discovery fix + connection UX refinement.** Discovery fix: `LocationReceiver`'s `NWBrowser` now uses `.bonjourWithTXTRecord(type:domain:)` instead of PTR-only `.bonjour(...)` — on device the plain descriptor delivered every result with `metadata == .none`, so the identity TXT never reached Dash (first-time pair now works iPhone↔iPad over Personal Hotspot). Testable seam `LocationReceiver.txtEntries(from:)` + `LocationReceiverTests` (7, incl. nil-metadata). UX (§5 decision 23): "Disconnect" while searching → **"Stop Searching"**; new `ConnectedControlView` overlay gives **Disconnect / Forget `<name>`** while connected (attached in `RootView`, not `ContentView`); DashRelay `.waiting` gains **"Stop Sharing"**; `pairAndConnect(to:named:)` stores a user-typed friendly name (**stable `id` untouched**) from a "Name this iPhone" alert, surfaced via `pairedRelayDisplayName`. Temporary `[DISCOVERY-DIAG]` `os.Logger` lines kept in `LocationReceiver` / `ConnectionCoordinator` pending a removal pass. Tests: `ConnectionCoordinatorTests` (22), `ConnectionSetupViewTests` (8), new `ConnectedControlViewTests` (2), `RelayStatusViewTests` (6). All green — DashShared 8, DashRelay 32, Dash 71. |
-| *(working tree, uncommitted)* | **first real Dash ↔ DashRelay pairing flow** — `DashShared` gains `RelayAdvertisement` (Bonjour TXT-record contract: stable `rid` + `name`). DashRelay: `RelayIdentity` mints/persists a per-install UUID; `LocationBroadcaster` publishes it in the service's TXT record (service name falls back to `"DashRelay"`). Dash: `LocationReceiver` reads each result's TXT record, reports the visible set via `onDiscoveryChange → [DiscoveredRelay]`, and connects **only** to the relay named by `setTargetRelay(id:)` — reconnecting only to that id, never "results.first". `KnownRelay` re-keyed to the stable id; `KnownDeviceStore` gains `pairedRelay`. `ConnectionCoordinator` now holds an injected `KnownDeviceStoring`, adds `discoveredRelays` / `connectedRelayID` / `connectedDisplayName` / `offerableRelays` / `pairedRelayName` and `pairAndConnect(to:)` / `forgetPairedRelay()`; auto-connects only to a *known* relay, never a stranger; Disconnect keeps the pairing, Forget removes it and returns to first-time browsing. `ConnectionSetupView` becomes a `Model`-driven picker + "Looking for `<name>`…" + a plain "Forget this iPhone" button. New/expanded tests: `RelayAdvertisementTests` (4), `RelayIdentityTests` (4), `LocationBroadcasterTests` (+2), `ConnectionCoordinatorTests` (18), `KnownDeviceStoreTests` (7, adapted), `ConnectionSetupViewTests` (8). All suites green (DashShared 8, DashRelay 31, Dash 63). **Pairing not yet verified device-to-device.** Device-identity rationale recorded in §5 decision 19. |
-| *(working tree, uncommitted)* | **first DashRelay connection/status UI** — `RelayStatusScreen` (container, reads `RelaySessionController`) + `RelayStatusView` (presentational, `State` + `onStart`/`onDisconnect` closures) in a new `DashRelay/Features/Status/` folder. Startup/waiting screen (`stopped` → Start; `waiting` → "Ready to Connect" + spinner) and a connected screen (`connected` → Disconnect, wired to the existing `RelaySessionController.stop()`). Connected screen shows a **generic** message — no device name, because the session layer does not expose a client name. `DashRelayApp` root swapped to `RelayStatusScreen`; `DashRelay/ContentView.swift` scaffold removed. New `RelayStatusViewTests` (5). `waiting` state rendered on the iPhone simulator, portrait + landscape. No pairing controls. |
+| `973ffc9` | **Map "M2": destination search** (search + destination selection only — no routing, navigation, or Apple Maps; dashboard / connection / relay untouched). Adds the **Google Places SDK** (`GooglePlaces` product, `ios-places-sdk` SPM, up-to-next-major from 11.1.0, Dash target only). New **`PlaceSearchService`** protocol — deliberately separate from `MapProvider` — with `GooglePlaceSearchService` (the only new `import GooglePlaces` file besides `GooglePlacesConfiguration`): autocomplete + Place Details (New) + one lazy `GMSAutocompleteSessionToken` per run, GMS errors mapped to `PlaceSearchError`. SDK-free: `Destination` / `PlaceSuggestion`, `DestinationStore` (source of truth for the chosen `Destination?`), `PlaceSearchViewModel` (debounce → suggestions → `resolve` → `onDestinationChosen`), custom `MapSearchView` (field + list + selected-destination chip). `MapViewModel.setDestination(_:)` drops a `MapMarker`, frames vehicle + destination via `MapCameraPlan.fit`, and toggles `.destinationPreview` ⟷ `.cruising`. `ContentView` composes map + search + store (none reference each other). `GooglePlacesConfiguration.bootstrap()` reuses the Maps key. Also in this commit: the M1 rendering-boundary widening (row below), and a follow-up `MapSearchView` styling fix — the suggestion-row secondary line + distance were invisible (`.foregroundStyle(.secondary)` / `.tertiary` wash out over `.regularMaterial`), changed to `Color(uiColor: .systemGray)`. Tests: new `PlaceSearchTests`, `MapContentTests` +M2 cases. Build clean; full `DashTests` green. **"Places API (New)" is enabled; autocomplete + the suggestion list are device-verified (§3). Place Details resolve / pin / preview camera still device-unverified (§6).** §5 item 25. |
+| `973ffc9` | **Map "M1": widen the rendering boundary** (committed together with M2, above — architecture only — no new SDKs/APIs, no search/routing/navigation/Apple Maps, no dashboard/connection changes; existing behaviour preserved). `MapProvider` goes from `makeMapView(camera:)` to `makeMapView(content: MapContent, onEvent:)` — SDK-neutral render state in, `MapEvent` out — and is kept **rendering-only** (search/routing become separate service abstractions later). New small SDK-neutral types: `MapGeometry` (`MapCoordinate`, `MapCoordinateBounds`), `MapCameraPlan` (`.follow` / `.fit`), `MapContent` (camera / vehicle / polylines / markers), `MapOverlay` (`MapPolyline`, `MapMarker`), `MapEvent` (+ `MapPOI`, `MapCameraPosition`), `MapMode`. `MapViewModel` gains `mode` / `setMode` / `handle(_:)` (no-op seam) and assembles `MapContent`. `GoogleMapProvider` becomes a `GMSMapViewDelegate` with `MapContent` diffing + keyed overlay dicts; still the only `import GoogleMaps` Map file. Fixed the two pre-existing `MapViewModel` main-actor warnings. Tests: new `MapContentTests` (10 — `MapCoordinateBounds` math + `MapViewModel` content/mode); existing `MapCameraStateTests` / `MapViewModelTests` unchanged and green. Build clean; full `DashTests` green (82). §5 item 24. |
+| `c3a3a18` | **physical-device discovery fix + connection UX refinement.** Discovery fix: `LocationReceiver`'s `NWBrowser` now uses `.bonjourWithTXTRecord(type:domain:)` instead of PTR-only `.bonjour(...)` — on device the plain descriptor delivered every result with `metadata == .none`, so the identity TXT never reached Dash (first-time pair now works iPhone↔iPad over Personal Hotspot). Testable seam `LocationReceiver.txtEntries(from:)` + `LocationReceiverTests` (7, incl. nil-metadata). UX (§5 decision 23): "Disconnect" while searching → **"Stop Searching"**; new `ConnectedControlView` overlay gives **Disconnect / Forget `<name>`** while connected (attached in `RootView`, not `ContentView`); DashRelay `.waiting` gains **"Stop Sharing"**; `pairAndConnect(to:named:)` stores a user-typed friendly name (**stable `id` untouched**) from a "Name this iPhone" alert, surfaced via `pairedRelayDisplayName`. (The temporary `[DISCOVERY-DIAG]` `os.Logger` lines used during this hardware debugging were removed before commit — none are in the source.) Tests: `ConnectionCoordinatorTests`, `ConnectionSetupViewTests`, new `ConnectedControlViewTests`, `RelayStatusViewTests`. All green. |
+| `c3a3a18` | **first real Dash ↔ DashRelay pairing flow** — `DashShared` gains `RelayAdvertisement` (Bonjour TXT-record contract: stable `rid` + `name`). DashRelay: `RelayIdentity` mints/persists a per-install UUID; `LocationBroadcaster` publishes it in the service's TXT record (service name falls back to `"DashRelay"`). Dash: `LocationReceiver` reads each result's TXT record, reports the visible set via `onDiscoveryChange → [DiscoveredRelay]`, and connects **only** to the relay named by `setTargetRelay(id:)` — reconnecting only to that id, never "results.first". `KnownRelay` re-keyed to the stable id; `KnownDeviceStore` gains `pairedRelay`. `ConnectionCoordinator` now holds an injected `KnownDeviceStoring`, adds `discoveredRelays` / `connectedRelayID` / `connectedDisplayName` / `offerableRelays` / `pairedRelayName` and `pairAndConnect(to:)` / `forgetPairedRelay()`; auto-connects only to a *known* relay, never a stranger; Disconnect keeps the pairing, Forget removes it and returns to first-time browsing. `ConnectionSetupView` becomes a `Model`-driven picker + "Looking for `<name>`…" + a plain "Forget this iPhone" button. New/expanded tests: `RelayAdvertisementTests` (4), `RelayIdentityTests` (4), `LocationBroadcasterTests` (+2), `ConnectionCoordinatorTests` (18), `KnownDeviceStoreTests` (7, adapted), `ConnectionSetupViewTests` (8). All suites green (DashShared 8, DashRelay 31, Dash 63). **Pairing not yet verified device-to-device.** Device-identity rationale recorded in §5 decision 19. |
+| `ec4d4a9` | **first DashRelay connection/status UI** — `RelayStatusScreen` (container, reads `RelaySessionController`) + `RelayStatusView` (presentational, `State` + `onStart`/`onDisconnect` closures) in a new `DashRelay/Features/Status/` folder. Startup/waiting screen (`stopped` → Start; `waiting` → "Ready to Connect" + spinner) and a connected screen (`connected` → Disconnect, wired to the existing `RelaySessionController.stop()`). Connected screen shows a **generic** message — no device name, because the session layer does not expose a client name. `DashRelayApp` root swapped to `RelayStatusScreen`; `DashRelay/ContentView.swift` scaffold removed. New `RelayStatusViewTests` (5). `waiting` state rendered on the iPhone simulator, portrait + landscape. No pairing controls. |
 | `9ccf6e0` | **feat(connection): add setup screen** — first Dash connection/setup UI. `ConnectionSetupView` in `Dash/Features/Connection/`: shown by `RootView` whenever Dash is not connected; communicates *not connected / discovering / connecting* and that a DashRelay iPhone on the same Wi‑Fi is needed; offers **Disconnect** while discovering/connecting and **Search for DashRelay** while idle; no pairing controls. Presentational (`ConnectionState` + closures in, `ConnectionSetupView.Display` for the mapping). `RootView` gate: `ContentView` ⟺ `isConnected` else `ConnectionSetupView`. New `ConnectionSetupViewTests` (5). Rendered on iPad portrait + landscape and iPhone portrait in the simulator. DashRelay UI untouched. |
 | `9a02364` | **feat(connection): add session and pairing foundation** — iPad `ConnectionCoordinator` (`disconnected`/`discovering`/`connecting`/`connected`, `startSession()`/`disconnect()`, feeds `LocationStore`) + `RootView` gate; iPhone `RelaySessionController` (`stopped`/`waiting`/`connected`, `start()`/`stop()` controls GPS); `KnownDeviceStore` for pairing state (storage only). `LocationStore` narrowed to location data + watchdog (lost `linkPhase`). `LocationReceiver.Status` gains `connectedServiceName`; `LocationTracker` gains a `wantsTracking` gate. New: `ConnectionCoordinatorTests` (12), `KnownDeviceStoreTests` (7), `RelaySessionControllerTests` (8). Deliberate disconnect verified (unit) not to auto-reconnect and to stop GPS; gate verified in the simulator against a real relay. |
 | `b3c98cb` | **docs: add project status** — this document. |
@@ -1348,14 +1345,17 @@ Git history on `main` (newest first):
   Simulator shows `RelayStatusView` in the `waiting` state ("Ready to Connect" +
   spinner) in both portrait and landscape. `stopped` / `connected` are covered by
   unit tests only.
-- **Pairing flow — automated only.** The TXT-record identity, first-time device
-  pick, auto-prefer-paired, "Looking for `<name>`…", Disconnect-keeps-pairing and
-  Forget-removes-pairing behaviours are all covered by the Swift Testing suites
-  and nothing else. **Not** run device-to-device and **not** re-rendered in the
-  simulator this round.
-- **Map M1 + M2 — automated only.** The M1 `GoogleMapProvider` rewrite and all of
-  M2 (destination search, `MapSearchView`, the destination pin + preview camera,
-  `GooglePlaceSearchService` against the live Places API) are covered only by
-  SDK-neutral Swift Testing suites + a clean build. Nothing map-related has been
-  run on a device or simulator since the pre-M1 "map + vehicle marker renders"
-  check.
+- **Pairing flow — first-time pair verified on hardware, the rest automated only.**
+  Discover-then-pick + connect works iPhone↔iPad over the Personal Hotspot (§3).
+  Auto-prefer-paired on a later launch, "Looking for `<name>`…", Disconnect,
+  Forget, "Stop Searching", the "name this iPhone" prompt, and
+  `ConnectedControlView` are covered by the Swift Testing suites only.
+- **Map M1 — automated only.** The M1 `GoogleMapProvider` delegate/diffing rewrite
+  is covered by SDK-neutral Swift Testing suites + a clean build; not re-run on a
+  device or simulator since the pre-M1 "map + vehicle marker renders" check.
+- **Map M2 — autocomplete verified on device.** On the physical iPad,
+  `GooglePlaceSearchService` autocomplete against the live **Places API (New)**
+  returns real results and the `MapSearchView` suggestion list renders (a contrast
+  bug in the row styling was found and fixed — §3, §6). Not yet run on device:
+  choosing a suggestion (Place Details resolve), the destination pin, and the
+  `.destinationPreview` camera.

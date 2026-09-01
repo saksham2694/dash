@@ -315,26 +315,41 @@ Test setup in this project:
 
 ---
 
-## Current repository state (2026-08-31)
+## Current repository state (2026-09-02)
 
-Starting point — almost nothing from the spec is built yet:
+**`PROJECT_STATUS.md` at the repo root is the authoritative, always-current
+status.** Read it before starting work — this section is only a pointer.
 
-- One Xcode project: `Dash/Dash.xcodeproj` with three targets — `Dash` (app),
-  `DashTests`, `DashUITests`.
-- `Dash/Dash/` contains only the default scaffold: `DashApp.swift` (single
-  `WindowGroup` → `ContentView`) and `ContentView.swift` (the "Hello, world!"
-  template). No `Core/`, `Models/`, `Features/`, or `Home/` yet.
-- **No `DashRelay` project. No `DashShared` package.** Both still need to be
-  created per the structure above.
-- Build settings: bundle id `com.sakshamsharma.Dash`, team `LGQX79QMNJ`,
-  iOS deployment target 26.5, Swift 5.0, device family iPhone + iPad,
-  project object version 77.
-- `PROJECT_SPEC.pdf` at repo root is the source of truth.
+Built and committed so far (latest commit `973ffc9 feat(map): add destination
+search`):
 
-When adding the second app and the shared package, decide whether to keep the
-current single-`.xcodeproj` layout or move to a workspace — the spec assumes the
-package is imported by "both Xcode projects", so a workspace (or an SPM package
-referenced by both) is the natural fit.
+- **`DashShared` package** — `LocationPacket`, `LocationWireFormat`,
+  `RelayAdvertisement`. Imported by `Dash` and `DashRelay`.
+- **`DashRelay` (iPhone)** — `LocationTracker`, `LocationBroadcaster` (Bonjour +
+  TXT record), `RelayIdentity`, `RelaySessionController`, and a minimal
+  `RelayStatusView`. GPS relay confirmed working device-to-device.
+- **`Dash` (iPad)** — `LocationReceiver` / `PacketLineBuffer` /
+  `LocationStore` (single source of truth + staleness watchdog);
+  `ConnectionCoordinator` + `KnownDeviceStore` (session + pairing);
+  `RootView` connection gate with `ConnectionSetupView` / `ConnectedControlView`.
+- **Map** — `MapProvider` rendering-only protocol with `GoogleMapProvider`
+  (Google Maps SDK 11.1.0); SDK-neutral `MapContent` / `MapEvent` / `MapMode` /
+  `MapGeometry` / `MapCameraState`; `MapViewModel` fed from `LocationStore`.
+- **Destination search (M2)** — `PlaceSearchService` protocol (separate from
+  `MapProvider`) with `GooglePlaceSearchService` (Google Places SDK 11.1.0,
+  autocomplete + Place Details New); SDK-neutral `Destination` /
+  `PlaceSuggestion` / `DestinationStore` / `PlaceSearchViewModel`; custom
+  `MapSearchView`; `MapViewModel.setDestination(_:)` drops a pin and frames a
+  vehicle-plus-destination preview camera.
+- Single `Dash.xcodeproj` (kept, not a workspace) with 6 targets; `DashShared`
+  is a local SPM package referenced by the project. Bundle ids
+  `com.sakshamsharma.Dash` / `.DashRelay`, team `LGQX79QMNJ`, apps target
+  iOS 18.6, test bundles 26.5.
+
+Not yet built: `Home/DashboardView` (the CarPlay tile layout — `ContentView` is
+still a placeholder full-screen map + search overlay), `ThemeManager`, music,
+speedometer/trip computer, `AppleMapProvider` + settings toggle, routing /
+navigation. See `PROJECT_STATUS.md` §7–§8 for the full list and ordering.
 
 ---
 
