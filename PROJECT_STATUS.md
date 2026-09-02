@@ -6,22 +6,27 @@ without conversation history.
 
 - **Last updated:** 2026-09-02
 - **Branch:** `main`
-- **Latest commit:** `28b5be5 feat(map): add routing` — the Map **M3** routing
-  layer (§5 item 26). **M3 is physically verified on device** (the live Routes
-  API returns a route and the polyline draws — see §3 / §10).
-- **Everything through M3 is committed.** The connection/pairing/relay-status work
-  landed in `9a02364` / `ec4d4a9` / `c3a3a18`; Map **M1** + **M2** in `973ffc9`;
-  Map **M3** in `28b5be5`. See §10 for the mapping. (Earlier drafts of this doc
-  labelled M3 as "working tree" — that is stale; it committed in `28b5be5`,
-  including the `X-Ios-Bundle-Identifier` header that unblocked the app-restricted
-  key on the REST call.)
-- **Working tree (not yet committed):** **Map "M4.1" — current-location / vehicle
-  indicator.** Replaces the red destination-style `GMSMarker` for the current
-  location with a provider-neutral `VehicleIndicator` (coordinate + optional
-  heading) that `GoogleMapProvider` renders navigation-style: a **blue location
-  dot** with no usable heading, a **rotating blue directional pointer** when
-  `LocationPacket.heading` is usable. No follow / navigation camera, no recenter,
-  no dashboard work. See §5 item 27, §10.
+- **Latest commit:** `8255749 feat(map): add vehicle indicator` — Map **M4.1**
+  (§5 item 27). **M4.1 is physically verified on device** (blue dot / rotating
+  pointer, distinct from the destination pin + route — see §3 / §10).
+- **Everything through M4.1 is committed.** Connection/pairing/relay-status →
+  `9a02364` / `ec4d4a9` / `c3a3a18`; Map **M1** + **M2** → `973ffc9`; **M3** →
+  `28b5be5` (Routes API device-verified; carries the `X-Ios-Bundle-Identifier`
+  header); **M4.1** → `8255749`. See §10 for the mapping.
+- **Working tree (not yet committed):** **Map "M4.2" — camera follow, manual
+  pan/zoom & recenter.** `MapViewModel.followsVehicle` (on by default): in
+  `.cruising` / `.navigating` the camera tracks the vehicle while follow is on;
+  **any** user pan/zoom/rotate gesture (via `MapEvent.cameraIdle`, no
+  distance/zoom threshold) turns it off so the vehicle moves under a fixed
+  camera; a small `RecenterButton` in `DashMapView` turns it back on and snaps to
+  the vehicle. The user-gesture vs programmatic split lives in `GoogleMapProvider`
+  via `GMSMapViewDelegate.willMove(byGesture:)`, latched
+  (`GoogleMapProvider.UserGestureLatch`) so a follow animation firing mid-gesture
+  can't mask it. New
+  `MapCameraPlan.navigation(state, pitchDegrees:, focusBelowCentre:)` — a tilted,
+  vehicle-below-centre framing for `.navigating`. `.destinationPreview` is
+  **unchanged** (one-shot fit, no re-frame on a fix). No turn-by-turn / ETA /
+  rerouting / voice / dashboard. See §5 item 28, §10.
 - **Authoritative requirements:** `PROJECT_SPEC.pdf` (repo root) — "iPad CarPlay-style Dashboard — Project Spec"
 - **Day-to-day guidance:** `CLAUDE.md` (repo root)
 
@@ -110,15 +115,16 @@ dash/
     │   └── Features/Map/                       # all SDK-neutral except GoogleMapProvider.swift
     │       ├── MapProvider.swift               # rendering-only protocol (MapContent in, MapEvent out) + MapProviderID
     │       ├── MapGeometry.swift               # MapCoordinate + MapCoordinateBounds (tightest-box math)
-    │       ├── MapCameraState.swift            # camera value type + following(_:); MapCameraPlan (.follow / .fit)
+    │       ├── MapCameraState.swift            # camera value type + following(_:); MapCameraPlan (.follow / .fit / .navigation)
     │       ├── MapContent.swift                # the render state: camera plan, vehicle indicator, polylines, markers
     │       ├── VehicleIndicator.swift          # M4.1 — SDK-neutral current-location: coordinate + optional heading (from LocationPacket)
     │       ├── MapOverlay.swift                # MapPolyline + MapMarker (identified, diffable overlay descriptors)
-    │       ├── MapEvent.swift                  # taps (map / POI / marker) + camera-idle; MapPOI, MapCameraPosition
-    │       ├── MapMode.swift                   # cruising / destinationPreview / navigating (only cruising is realised)
-    │       ├── MapViewModel.swift              # holds provider + mode + destination + route; derives MapContent (incl. VehicleIndicator); routes MapEvent
-    │       ├── DashMapView.swift               # neutral SwiftUI component
-    │       ├── GoogleMapProvider.swift         # ONLY Map file importing GoogleMaps; wraps GMSMapView, diffs overlays + vehicle indicator, bridges the delegate
+    │       ├── MapEvent.swift                  # taps (map / POI / marker) + camera-idle (byUserGesture, M4.2-filtered); MapPOI, MapCameraPosition
+    │       ├── MapMode.swift                   # cruising / destinationPreview / navigating (camera framing realised for all three)
+    │       ├── MapViewModel.swift              # holds provider + mode + destination + route + followsVehicle; derives MapContent; recenter(); routes MapEvent
+    │       ├── DashMapView.swift               # neutral SwiftUI component; overlays the RecenterButton (M4.2)
+    │       ├── RecenterButton.swift            # M4.2 — small "resume follow" affordance (presentational; NOT in GoogleMapProvider)
+    │       ├── GoogleMapProvider.swift         # ONLY Map file importing GoogleMaps; wraps GMSMapView, diffs overlays + vehicle + camera, UserGestureLatch (willMove-based)
     │       ├── Search/                         # M2 — destination search (all SDK-neutral except GooglePlaceSearchService.swift)
     │       │   ├── Destination.swift           # Destination + PlaceSuggestion value types
     │       │   ├── PlaceSearchService.swift    # provider-neutral protocol (suggestions / details) + PlaceSearchError
@@ -148,6 +154,7 @@ dash/
     │   ├── PlaceSearchTests.swift             # PlaceSearchViewModel (debounce/resolve, stub service) + DestinationStore
     │   ├── RouteTests.swift                   # M3: Route model, polyline decode, Routes request/response mapping, RouteViewModel, MapViewModel.setRoute
     │   ├── VehicleIndicatorTests.swift        # M4.1: LocationPacket → VehicleIndicator (heading validation); GoogleMapProvider.vehicleStyle dot/pointer
+    │   ├── CameraFollowTests.swift            # M4.2: follow on/off, any user gesture disables (incl. tiny), recenter, navigation plan, UserGestureLatch
     │   └── DashTests.swift          # scaffold `example()` — no-op, still present
     ├── DashUITests/                 # Xcode scaffold only, no real tests
     └── DashRelay/                   # iPhone app target
@@ -534,9 +541,12 @@ not replace their responsibilities.
     No search / routing / place methods, by design.
   - `MapGeometry` — `MapCoordinate` and `MapCoordinateBounds` (`init?([MapCoordinate])`
     → tightest box; `center`).
-  - `MapCameraState` — unchanged value type (lat/lon/`headingDegrees?`/zoom +
-    `.default` + `following(_:)`), now also `center`. `MapCameraPlan` — `.follow(MapCameraState)`
-    or `.fit(MapCoordinateBounds, padding:)` (the fit case is unused until routing).
+  - `MapCameraState` — value type (lat/lon/`headingDegrees?`/zoom + `.default` +
+    `following(_:)` + `center`). `MapCameraPlan` — `.follow(MapCameraState)` /
+    `.fit(MapCoordinateBounds, padding:)` (route preview) /
+    `.navigation(MapCameraState, pitchDegrees:, focusBelowCentre:)` (M4.2 — a
+    tilted, vehicle-below-centre framing; the provider turns it into its own
+    camera + viewport padding).
   - `MapContent` — the full render state: `camera: MapCameraPlan`,
     `vehicle: VehicleIndicator` (M4.1 — was a bare `MapCoordinate`),
     `polylines: [MapPolyline]`, `markers: [MapMarker]`. `Equatable` for provider-side diffing.
@@ -548,18 +558,28 @@ not replace their responsibilities.
     (`id` + `coordinate` + `title?`), both `Identifiable`. (The vehicle indicator
     is deliberately *not* here — exactly one per render.)
   - `MapEvent` — `.tappedMap` / `.tappedPOI(MapPOI)` / `.tappedMarker(id:)` /
-    `.cameraIdle(MapCameraPosition, byUserGesture:)`.
-  - `MapMode` — `cruising` / `destinationPreview` / `navigating`. As of M2
-    `destinationPreview` is realised (a chosen destination); `navigating` still
-    falls back to follow.
-  - `MapViewModel` — holds `any MapProvider` + `mode` + the retained follow
-    `camera` + `destination` + `route`; `update(with:)` moves the
-    `VehicleIndicator` (position + validated heading) and re-centres the retained
-    camera (rendered camera left alone while previewing — **unchanged by M4.1**);
-    `setMode(_:)`; **`setDestination(_:)`** / **`setRoute(_:)`** (M2/M3);
-    `handle(_ event:)` (still a documented no-op seam).
-  - `DashMapView` — neutral component; feeds `location` in via `.onChange` /
-    `.onAppear`, forwards `MapEvent`s to `viewModel.handle`.
+    `.cameraIdle(MapCameraPosition, byUserGesture:)`. As of M4.2 `byUserGesture`
+    is `true` for **any** user pan/zoom/rotate gesture — however small — and
+    `false` for programmatic camera moves. No distance/zoom threshold.
+  - `MapMode` — `cruising` / `destinationPreview` / `navigating`. All three have
+    realised camera framing now (`.navigating` since M4.2); guidance overlays for
+    `.navigating` are still to come, and nothing drives the app into `.navigating`
+    yet (no "start navigation" UI).
+  - `MapViewModel` — holds `any MapProvider` + `mode` + retained `camera` +
+    `destination` + `route` + **`followsVehicle`** (M4.2, `@Published`).
+    `update(with:)` always moves the `VehicleIndicator`; it re-derives the
+    rendered camera **only** in `.cruising` / `.navigating` while `followsVehicle`
+    is on. `handle(.cameraIdle(_, byUserGesture: true))` in a follow mode →
+    `followsVehicle = false` (+ remembers the user's zoom); programmatic idles are
+    ignored (no feedback loop). **`recenter()`** re-arms follow and snaps to the
+    vehicle with the mode's plan; a deliberate mode change (`setMode` /
+    `setDestination`) also re-arms it. `showsRecenterButton` = follow off in a
+    follow mode. `.destinationPreview` is untouched by M4.2.
+  - `DashMapView` — neutral component; feeds `location` in, forwards `MapEvent`s,
+    and overlays `RecenterButton` (bottom-trailing) when `showsRecenterButton`.
+  - `RecenterButton` (M4.2) — a small presentational circular button; `DashMapView`
+    owns its visibility and wires the tap to `viewModel.recenter()`. Not in the
+    provider.
 - **[Implemented]** Destination search (M2 — see §5 item 25):
   - `Destination` / `PlaceSuggestion` — SDK-neutral value types (`placeID`,
     name, address?, `MapCoordinate` / primary+secondary text).
@@ -632,6 +652,16 @@ not replace their responsibilities.
   then swaps the marker's icon (code-drawn blue dot vs blue arrowhead) and sets
   `marker.rotation` = the bearing. No `GoogleMapProvider` change was needed for
   M3; M4.1 replaced only the default-red-pin vehicle marker.
+  **M4.2:** `applyCamera` handles `.navigation` (`viewingAngle` = pitch, bottom
+  `mapView.padding` = viewport-height × `focusBelowCentre`); `.follow` / `.fit`
+  reset the padding. `idleAt` reports `byUserGesture` from
+  `UserGestureLatch` — a pure `nonisolated struct` (unit-tested, no GMS) that
+  `willMove(byGesture:)` latches on for any user gesture and `idleAt` consumes.
+  The latch is deliberate: a programmatic follow animation can fire *between* a
+  gesture starting and the camera settling, reporting `byGesture: false`; that
+  must not erase that the user is interacting. **No distance or zoom threshold** —
+  any real pan/zoom/rotate, however small, drops follow; a purely programmatic
+  move never sets the latch, so there is no feedback loop.
 - **[Implemented]** `GoogleMapsConfiguration` — reads `GoogleMapsAPIKey` from the
   bundle (build-injected, see §9), exposes it as `apiKey`, and calls
   `GMSServices.provideAPIKey`; returns `false` and does nothing if unset. No key
@@ -702,23 +732,32 @@ not replace their responsibilities.
   unchanged): default heading is `nil`, `following` re-centres and keeps zoom,
   negative heading → `nil`, zero heading kept, default provider is `.googleMaps`,
   `update(with:)` moves the camera, `update(with: nil)` is a no-op.
-- **[Verified · automated]** `MapContentTests` (18): `MapCoordinateBounds`
-  — empty → `nil`, single coordinate → degenerate box, spans min/max lat & lon,
-  centre is the midpoint; `MapViewModel` — starts `.cruising` with no overlays and
-  `.follow(.default)`, a fix moves vehicle + follow camera together, `nil` fix is
-  a no-op, zoom persists across fixes, `setMode` fallback; **M2**: `setDestination`
-  drops a pin + enters `.destinationPreview`, the preview camera `.fit`s vehicle +
-  destination, a later fix moves the vehicle but not the camera, clearing removes
-  the pin and resumes `.follow`, a nameless destination → titleless marker;
-  **M4.1**: a fix with a usable heading orients the vehicle indicator, an invalid
-  (negative) heading leaves it heading-less, a later fix moves it to the newest
-  coordinate.
+- **[Verified · automated]** `MapContentTests` (18): `MapCoordinateBounds` math;
+  `MapViewModel` — starts `.cruising`/following with `.follow(.default)`, a fix
+  moves vehicle + follow camera together, `nil` fix is a no-op, zoom persists;
+  `setMode` camera plans (preview-no-destination → follow, navigating →
+  `.navigation`); **M2**: `setDestination` pin + `.fit` preview, later fix moves
+  the vehicle not the camera, clearing resumes `.follow`, nameless → titleless;
+  **M4.1**: heading orients / invalid heading clears / follows latest coordinate;
+  tap events + programmatic camera-idle are inert.
 - **[Verified · automated]** `VehicleIndicatorTests` (9 — M4.1): `LocationPacket`
-  → `VehicleIndicator` (coordinate carried; heading kept for a usable / zero
-  value, dropped for negative / NaN; memberwise init defaults to no heading);
-  `GoogleMapProvider.vehicleStyle` — no heading → `.locationDot`, a heading →
-  `.directionalPointer(rotationDegrees:)` (incl. heading 0 → pointer, not a dot).
-  The `GMSMarker` icon drawing / rotation stays device-validated.
+  → `VehicleIndicator` (coordinate; heading kept for usable / zero, dropped for
+  negative / NaN); `GoogleMapProvider.vehicleStyle` dot vs rotated pointer. The
+  `GMSMarker` icon drawing / rotation stays device-validated.
+- **[Verified · automated]** `CameraFollowTests` (20 — M4.2): **cruising** —
+  follow on by default + camera tracks the vehicle, a user pan turns follow off,
+  **even a tiny sub-metre / 0.01-zoom user gesture turns follow off**, then a fix
+  moves the vehicle not the camera, a programmatic camera-idle never turns follow
+  off, `recenter()` re-arms follow + snaps to the vehicle at the user's zoom +
+  uses the latest fix, a mode change re-arms follow; **preview** — one-shot fit
+  unchanged, a pan does not drop follow / show the button, `recenter()` is a
+  no-op; **navigating** — enters + follows with `.navigation`, respects
+  follow-off, `recenter()` uses `.navigation`, the plan is tilted + below-centre;
+  **`UserGestureLatch`** — starts clear, a gesture latches until `idleAt`
+  consumes it, a programmatic move alone never latches, a programmatic move
+  interleaved with a gesture does **not** clear the latch, the latch does not
+  leak to the next idle. The `GMSMapView` camera / gesture wiring stays
+  device-validated.
 - **[Verified · automated]** `PlaceSearchTests` (11): `DestinationStore`
   select/clear; `PlaceSearchViewModel` (stub service) — a sub-minimum query
   doesn't hit the service, a valid query publishes suggestions, `origin` is
@@ -767,11 +806,22 @@ not replace their responsibilities.
   `API_KEY_IOS_APP_BLOCKED` 403 — the Maps / Places SDKs send the bundle id
   automatically, the raw `URLSession` call did not). The Routes API is therefore
   confirmed **enabled and authorised** on the project. Committed in `28b5be5`.
-- **[NOT verified on device — pending this milestone]** **M4.1** current-location
-  indicator. Builds clean, +12 unit tests (the neutral representation + the
-  dot/pointer decision), but the blue dot / rotating pointer / heading rotation /
-  coordinate movement, and the visual distinctness from the destination pin +
-  route, have not yet been seen on a screen. (Verification in progress — see §10.)
+- **[Verified · on device]** **M4.1** current-location indicator on the physical
+  iPad: the current location is the blue dot / pointer (not a red pin), it moves
+  with each fix, and it reads as distinct from the destination pin + route.
+  Committed in `8255749`.
+- **[Partly verified on device — re-check pending after the gesture fix]**
+  **M4.2** camera follow / pan / recenter. Builds clean, +20 unit tests. A first
+  device pass found that a distance-threshold gesture heuristic let map drags and
+  small/fast pinch-zooms fail to drop follow; that threshold has been removed (any
+  `willMove(byGesture:)` gesture now drops follow) and the fixed build is
+  installed on the iPad. Still to re-confirm on a real screen: cruising following
+  the vehicle, **any-size** pan/zoom dropping follow, the `RecenterButton`
+  appearing and restoring follow, GPS fixes moving the vehicle under a fixed
+  camera while follow is off, and that preview + route are unchanged.
+  `.navigating` framing cannot be entered through any existing UI (no "start
+  navigation" flow), so its on-device look is **out of scope for this milestone's
+  verification** — flagged in §10.
 
 ### End-to-end
 
@@ -810,11 +860,11 @@ not replace their responsibilities.
 |---|---:|---|
 | `DashSharedTests` | 8 | `swift test` |
 | `DashRelayTests` | 32 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
-| `DashTests` | 145 (per the Xcode test plan; incl. 1 no-op scaffold; +28 for M3 `RouteTests`, +12 for M4.1) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+| `DashTests` | 165 (per the Xcode test plan; incl. 1 no-op scaffold; +29 M3, +12 M4.1, +20 M4.2) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
 
 Last full run (`xcodebuild test -scheme Dash -only-testing:DashTests`, iPad
-simulator, 2026-09-02, with M4.1 in the working tree): all 145 pass, build clean
-with no warnings.
+simulator, 2026-09-02, with M4.2 + the user-gesture-detection fix in the working
+tree): all pass (**TEST SUCCEEDED**, 0 failures), build clean with no warnings.
 
 `DashSharedTests` breakdown: `LocationPacketTests` (4), `RelayAdvertisementTests` (4).
 `DashRelayTests` breakdown: `LocationTrackerTests` (7), `LocationBroadcasterTests`
@@ -829,13 +879,16 @@ in `MapContentTests.swift`; `GooglePlaceSuggestionMappingTests` +
 `DestinationStoreTests` + `PlaceSearchViewModelTests` in `PlaceSearchTests.swift`;
 `RouteModelTests` + `GooglePolylineTests` + `GoogleRouteServiceMappingTests` +
 `GoogleRouteServiceTests` + `RouteViewModelTests` + `MapViewModelRouteTests` in
-`RouteTests.swift`; `VehicleIndicatorTests` + `GoogleMapVehicleStyleTests` (9
-total, M4.1) in `VehicleIndicatorTests.swift`.
+`RouteTests.swift`; `VehicleIndicatorTests` + `GoogleMapVehicleStyleTests` (M4.1)
+in `VehicleIndicatorTests.swift`; `CruisingFollowTests` + `PreviewUnchangedTests`
++ `NavigatingCameraTests` + `UserGestureLatchTests` (20 total, M4.2) in
+`CameraFollowTests.swift`.
 (Map / search / routing have no SDK-level tests — `GoogleMapProvider` /
-`GMSMapView` (incl. the M4.1 vehicle-marker icon drawing / rotation),
-`GooglePlaceSearchService` / `GMSPlacesClient`, and the live Routes API stay
-device-validated. `GoogleRouteService` is unit-tested with a mocked `URLSession`;
-`GoogleMapProvider.vehicleStyle` is a pure helper unit-tested with no GMS type.)
+`GMSMapView` (incl. the M4.1 vehicle-marker drawing and the M4.2 `.navigation`
+camera / gesture wiring), `GooglePlaceSearchService` / `GMSPlacesClient`, and the
+live Routes API stay device-validated. `GoogleRouteService` is unit-tested with a
+mocked `URLSession`; `GoogleMapProvider.vehicleStyle` and `.UserGestureLatch` are
+pure helpers unit-tested with no GMS type.)
 
 ---
 
@@ -1199,8 +1252,48 @@ device-validated. `GoogleRouteService` is unit-tested with a mocked `URLSession`
     - **Camera untouched.** `update(with:)`'s camera line is exactly as M1 left
       it. In `.destinationPreview` (the device-test scenario) the rendered camera
       does not move when the vehicle moves; the pre-existing `.cruising`
-      follow-on-fix is unchanged (a genuine follow / recenter feature is a later
-      M4 task — see §6).
+      follow-on-fix is unchanged (a genuine follow / recenter feature is M4.2).
+
+28. **Map "M4.2": camera follow, manual pan/zoom & recenter (2026-09-02).**
+    Makes vehicle-follow an explicit, toggleable state and adds a recenter
+    affordance. **Camera framing only — no turn-by-turn / maneuvers / ETA /
+    rerouting / voice / navigation UI / dashboard.**
+    - **`MapViewModel.followsVehicle`** (`@Published`, on by default) is the
+      provider-neutral follow state. `update(with:)` re-derives the rendered
+      camera only in `.cruising` / `.navigating` while it is on; otherwise the
+      `VehicleIndicator` moves under a fixed camera. `.destinationPreview` never
+      touches the camera on a fix — the M3 one-shot fit is preserved exactly (a
+      pan while previewing does not drop follow either).
+    - **User gesture vs programmatic.** The distinction is made in
+      `GoogleMapProvider`, not the view model, and is driven **solely by GMS's
+      `willMove(byGesture:)` flag** — there is no distance/zoom threshold, so
+      *any* real pan/zoom/rotate, however small, ends up reported as
+      user-driven. A pure `nonisolated struct UserGestureLatch` holds the flag:
+      `willMove(byGesture: true)` latches it on, `idleAt` consumes it via
+      `consumeOnIdle()`. The latch is deliberate — a programmatic follow
+      animation can fire *between* the gesture starting and the camera settling,
+      reporting `byGesture: false`; that must not erase that the user is
+      interacting. A purely programmatic move never latches, so a follow render
+      can never disable itself — no feedback loop. `MapViewModel.handle` turns
+      follow off on any user idle and remembers the user's zoom.
+      *(Fixed 2026-09-02 after device testing showed the earlier threshold-based
+      `isMeaningfulMove` heuristic let small/fast drags and pinch-zooms slip
+      through, and a mid-gesture follow animation could clear the state.)*
+    - **`recenter()`** re-arms follow and snaps to the vehicle with the current
+      mode's plan; `setMode` / `setDestination` also re-arm it. `RecenterButton`
+      (a small presentational SwiftUI view, **not** in `GoogleMapProvider`) is
+      overlaid by `DashMapView` when `showsRecenterButton` (follow off in a
+      follow mode) and wired to `recenter()`.
+    - **`MapCameraPlan.navigation(state, pitchDegrees:, focusBelowCentre:)`** —
+      the distinct `.navigating` framing: `GoogleMapProvider` sets
+      `viewingAngle` = pitch and bottom `mapView.padding` = viewport-height ×
+      `focusBelowCentre` so the vehicle sits below centre with more road ahead;
+      `state.headingDegrees` becomes the camera bearing. `.follow` / `.fit` reset
+      the padding. Constants live on `MapViewModel`
+      (`navigationPitchDegrees = 55`, `navigationFocusBelowCentre = 0.28`).
+    - **`.navigating` has no entry point yet.** Nothing in the current UI calls
+      `setMode(.navigating)`, so the navigation camera is code + tests only until
+      a "start navigation" flow lands (later M4).
 
 ---
 
@@ -1262,13 +1355,22 @@ device-validated. `GoogleRouteService` is unit-tested with a mocked `URLSession`
 - **M3: `RouteViewModel` is not `MapMode`-aware.** A route is fetched whenever a
   destination is set; there is no "start navigation" gate yet (that's M4). The
   route simply appears in `.destinationPreview`.
-- **M4.1: the `.cruising` camera still follows the vehicle on every fix.** This is
-  pre-existing M1 behaviour and M4.1 deliberately did not touch it. So in
-  `.cruising` (no destination) the map *does* re-centre as the vehicle moves; the
-  "camera does not move when the vehicle moves" guarantee only holds in
-  `.destinationPreview` today. A real, mode-gated **follow / recenter** feature
-  (with a recenter button and a "user panned away" drop-out) is a later M4 task —
-  M4.1 is the indicator only.
+- **M4.2: `.navigating` has no way in.** Nothing in the shipped UI calls
+  `setMode(.navigating)`, so the navigation camera plan (tilt + vehicle below
+  centre + heading bearing) is exercised only by unit tests and cannot be
+  verified on device until a "start navigation" flow lands (later M4). Cruising
+  follow, gesture-drop, and recenter are all reachable and device-verifiable now.
+- **M4.2: gesture detection trusts `willMove(byGesture:)`.** Any user
+  pan/zoom/rotate drops follow — there is no distance/zoom threshold (the
+  earlier `isMeaningfulMove` heuristic was removed 2026-09-02 after device
+  testing showed small/fast gestures slipping through). This means follow relies
+  entirely on GMS setting the `byGesture` flag correctly; if a future SDK version
+  mislabels a programmatic move as a gesture it would spuriously drop follow
+  (recenter always restores it). Programmatic-only moves never latch the gesture
+  state, so there is still no feedback loop.
+- **M4.2: no heading smoothing in the navigation camera either.** The camera
+  bearing is the raw latest `LocationPacket.heading`; same jitter caveat as the
+  indicator below.
 - **M4.1: no heading smoothing.** The pointer snaps to the raw latest
   `LocationPacket.heading`; at low speed / poor GPS it can jitter. Smoothing was
   explicitly out of scope for this task.
@@ -1371,16 +1473,22 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
   `RouteViewModel`, `RouteStatusView`, `MapViewModel.setRoute(_:)`. Routes API
   enabled + authorised; live request + polyline confirmed on the iPad (§3, §10).
   Committed `28b5be5`.
-- **[Implemented · unit-tested, device-unverified]** M4.1 current-location
-  indicator (§5 item 27): `VehicleIndicator`, `GoogleMapProvider.vehicleStyle` +
-  the blue dot / rotating pointer rendering. Verification of the on-screen look /
-  heading rotation is in progress (§3, §10).
-- **[Planned]** Map layer depth, remaining (the rest of **M4**): a mode-gated
-  **follow / recenter** camera (recenter button, drop out when the user pans),
-  then a provider-neutral **guidance engine** driven by `LocationStore` + the
-  cached route — maneuver card, off-route detection, navigation camera. Also:
-  turning a map POI tap (`MapEvent.tappedPOI`) into a destination; an Apple
-  `MKDirections` `RouteService`.
+- **[Implemented · device-verified]** M4.1 current-location indicator (§5 item
+  27): `VehicleIndicator`, `GoogleMapProvider.vehicleStyle` + the blue dot /
+  rotating pointer rendering. Device-verified, committed `8255749`.
+- **[Implemented · partially device-verified]** M4.2 camera follow / manual
+  pan-zoom / recenter (§5 item 28): `MapViewModel.followsVehicle`,
+  `recenter()` / `showsRecenterButton`, `RecenterButton`,
+  `MapCameraPlan.navigation`, provider-side user-gesture detection
+  (`GoogleMapProvider.UserGestureLatch` over `willMove(byGesture:)`, no
+  threshold). Cruising follow / pan-drop /
+  recenter are device-verifiable now; the `.navigating` camera plan is
+  unit-tested only (no UI enters `.navigating` yet). Working tree.
+- **[Planned]** Map layer depth, remaining (the rest of **M4**): a "start
+  navigation" flow that enters `.navigating`; then a provider-neutral **guidance
+  engine** driven by `LocationStore` + the cached route — maneuver card,
+  off-route detection. Also: turning a map POI tap (`MapEvent.tappedPOI`) into a
+  destination; an Apple `MKDirections` `RouteService`.
 - **[Planned]** Dock-style row of favourite/frequent destinations.
 - **[Future idea]** Weather widget (WeatherKit free tier).
 - **[Future idea]** Parking-location auto-pin on Bluetooth disconnect.
@@ -1416,8 +1524,8 @@ Roughly in order (adapts the spec §11 build order to where we are):
 6. **Music** — MusicKit catalog search + custom player.
 7. **`AppleMapProvider` + Settings toggle** — second provider, persisted choice.
 
-Map-feature sub-track (independent of the above ordering; **M1 + M2 + M3
-committed; M4.1 in the working tree**):
+Map-feature sub-track (independent of the above ordering; **M1 + M2 + M3 + M4.1
+committed; M4.2 in the working tree**):
 - **M1 [done]** — widen the rendering boundary for overlays / events / modes
   (§5 item 24).
 - **M2 [done, device-verified for autocomplete]** — `PlaceSearchService` + Google
@@ -1428,13 +1536,19 @@ committed; M4.1 in the working tree**):
   `GooglePolyline` / `RouteViewModel` / `RouteStatusView`, route polyline via
   `MapViewModel.setRoute(_:)`; live request + polyline confirmed on the iPad
   (needed the `X-Ios-Bundle-Identifier` header). §5 item 26.
-- **M4.1 [code done, unit-tested; not committed; device verification in progress]**
-  — provider-neutral `VehicleIndicator` + navigation-style current-location
-  rendering in `GoogleMapProvider` (blue dot / rotating pointer from
-  `LocationPacket.heading`). §5 item 27. **Indicator only** — no follow camera.
-- **M4.2+** — a mode-gated follow / recenter camera; then the provider-neutral
-  guidance engine (maneuver card, off-route detection, navigation camera) driven
-  by `LocationStore` + the M3 route.
+- **M4.1 [done, device-verified, committed `8255749`]** — provider-neutral
+  `VehicleIndicator` + navigation-style current-location rendering in
+  `GoogleMapProvider` (blue dot / rotating pointer from `LocationPacket.heading`).
+  §5 item 27. **Indicator only** — no follow camera.
+- **M4.2 [code done, unit-tested; not committed; cruising follow/recenter
+  device-verifiable, `.navigating` camera unit-tested only]** — provider-neutral
+  `followsVehicle` state, `RecenterButton`, threshold-free user-gesture detection
+  in `GoogleMapProvider` (`UserGestureLatch` over `willMove(byGesture:)`), and the
+  `MapCameraPlan.navigation` framing. §5 item 28. **Camera framing only** — no
+  turn-by-turn / rerouting / ETA / voice.
+- **M4.3+** — a "start navigation" flow that actually enters `.navigating`; then
+  the provider-neutral guidance engine (maneuver card, off-route detection)
+  driven by `LocationStore` + the M3 route.
 8. **Polish pass** — `ThemeManager`, idle-timer disable, hide iPadOS chrome,
    favourites dock, landscape-primary orientation config.
 
@@ -1540,7 +1654,8 @@ Git history on `main` (newest first):
 
 | Commit | Milestone |
 |---|---|
-| *(working tree, uncommitted)* | **Map "M4.1": current-location / vehicle indicator** (indicator only — **no** follow camera, navigation camera, ahead-of-vehicle framing, recenter, heading smoothing, or dashboard work). New SDK-neutral **`VehicleIndicator`** (`coordinate` + `headingDegrees: Double?`; `init(_ packet:)` validates the heading — negative / NaN → `nil`). `MapContent.vehicle` changes from `MapCoordinate` → `VehicleIndicator`; `MapViewModel.update(with:)` sets it from the latest `LocationPacket` (position + validated heading); `cameraPlan()` reads `.coordinate` — **camera logic byte-for-byte unchanged from M1**. `GoogleMapProvider`: the one vehicle `GMSMarker` is now `isFlat`, centre-anchored, `zIndex 1`, not tappable; **`vehicleStyle(for:)`** (pure `nonisolated static`, no GMS, unit-tested) → `.locationDot` / `.directionalPointer(rotationDegrees:)`; `syncVehicle(_:on:)` swaps a code-drawn **blue dot** (no heading) / **blue arrowhead** (heading) icon and sets `marker.rotation` = bearing. No `LocationPacket` / `LocationTracker` / relay change — heading was already on the wire. Tests: new **`VehicleIndicatorTests` (9)** + `MapContentTests` +3. Build clean, no warnings; full `DashTests` green (145). **Device verification of the on-screen indicator / heading rotation in progress (§3, §10).** §5 item 27. |
+| *(working tree, uncommitted)* | **Map "M4.2": camera follow, manual pan/zoom & recenter** (camera framing only — **no** turn-by-turn, maneuvers, ETA, rerouting, voice, navigation UI, or dashboard work). New `@Published MapViewModel.followsVehicle` (on by default): in `.cruising` / `.navigating`, `update(with:)` re-derives the rendered camera each fix only while follow is on; otherwise the `VehicleIndicator` moves under a fixed camera. **`.destinationPreview` is untouched** — still a one-shot `.fit`, no re-frame on a fix, and a pan there does not drop follow. New `recenter()` / `showsRecenterButton`; `setMode` / `setDestination` re-arm follow. New **`MapCameraPlan.navigation(state, pitchDegrees:, focusBelowCentre:)`** — tilted, vehicle-below-centre framing for `.navigating` (constants on `MapViewModel`: pitch 55°, focus 0.28). `GoogleMapProvider`: user-gesture vs programmatic split lives here — `MapEvent.cameraIdle(_, byUserGesture:)` is `true` for **any** user pan/zoom/rotate (no distance/zoom threshold) and `false` for programmatic moves, via a pure `UserGestureLatch` over GMS `willMove(byGesture:)` (latched so a follow animation firing mid-gesture can't mask it); `.navigation` sets `viewingAngle` + bottom `mapView.padding`. New presentational **`RecenterButton`** (SwiftUI, **not** in `GoogleMapProvider`), overlaid by `DashMapView` when `showsRecenterButton`. **`.navigating` has no UI entry point yet** — its camera plan is unit-tested only. Tests: new **`CameraFollowTests` (20)** + `MapContentTests` (2 renamed/expanded). Build clean, no warnings; full `DashTests` green (165). Cruising follow / any-size-gesture pan-drop / recenter are device-verifiable and the fixed build is installed on the iPad for re-check; `.navigating` pending. *(The initial M4.2 pass used a `isMeaningfulMove` distance threshold; device testing showed small/fast gestures slipping through, so gesture detection was simplified to trust `willMove(byGesture:)` alone — same day.)* §5 item 28. |
+| `8255749` | **Map "M4.1": current-location / vehicle indicator** (indicator only — **no** follow camera, navigation camera, ahead-of-vehicle framing, recenter, heading smoothing, or dashboard work). New SDK-neutral **`VehicleIndicator`** (`coordinate` + `headingDegrees: Double?`; `init(_ packet:)` validates the heading — negative / NaN → `nil`). `MapContent.vehicle` changes from `MapCoordinate` → `VehicleIndicator`; `MapViewModel.update(with:)` sets it from the latest `LocationPacket` (position + validated heading); `cameraPlan()` reads `.coordinate` — **camera logic byte-for-byte unchanged from M1**. `GoogleMapProvider`: the one vehicle `GMSMarker` is now `isFlat`, centre-anchored, `zIndex 1`, not tappable; **`vehicleStyle(for:)`** (pure `nonisolated static`, no GMS, unit-tested) → `.locationDot` / `.directionalPointer(rotationDegrees:)`; `syncVehicle(_:on:)` swaps a code-drawn **blue dot** (no heading) / **blue arrowhead** (heading) icon and sets `marker.rotation` = bearing. No `LocationPacket` / `LocationTracker` / relay change — heading was already on the wire. Tests: new **`VehicleIndicatorTests` (9)** + `MapContentTests` +3. Build clean, no warnings; full `DashTests` green (145). **Device-verified** (blue dot / rotating pointer, distinct from the red pin + blue route). §5 item 27. |
 | `28b5be5` | **Map "M3": routing** (routing only — no turn-by-turn, maneuvers, navigation / ahead-of-vehicle camera, vehicle heading/arrow, auto-rerouting, voice, or dashboard work). New `Features/Map/Routing/`: SDK-neutral **`RouteService`** protocol + `Route` (`polyline` / `distanceMeters` / `Duration`) + `RouteError`; **`GoogleRouteService`** — Google **Routes API** over `URLSession` (`Foundation` only, no GMS types; `TRAFFIC_UNAWARE` DRIVE `computeRoutes`, minimal field mask), transport + key accessor injected for tests; `GooglePolyline.decode` (pure encoded-polyline decoder); `RouteViewModel` (SDK-free, holds no `LocationStore`; `state` = `idle` / `loading` / `loaded(Route)` / `noCurrentLocation` / `failed`; one request per selection or Retry, cancels in-flight, **no auto-reroute**); `RouteStatusView` (small transient `.regularMaterial` pill: spinner / "Waiting for GPS" / "Route unavailable" + Retry — **not** a nav sheet, no ETA). `MapViewModel.setRoute(_ route: Route?)` puts one `MapPolyline(id: "route", …)` on `MapContent.polylines`, and — **only in `.destinationPreview`** — re-fits the `.fit` camera **once** around vehicle + destination + route so the whole route is visible (a later fix still does not move it — not navigation camera); `.cruising` camera untouched; `setDestination(_:)` clears the stale route. `GoogleMapProvider` **unchanged** — its M1 `GMSPolyline` sync path draws the route. `GoogleMapsConfiguration.apiKey` / `.infoPlistKey` marked `nonisolated` (plain `Bundle.main` read; no behaviour change). `ContentView` wires `destination → setDestination + requestRoute`, `routeVM.state(.loaded) → setRoute`. Also carries the **`X-Ios-Bundle-Identifier` header** (added during device verification — the key's iOS app restriction was 403-blocking the raw REST call). Tests: new **`RouteTests` (29)**. Build clean, no warnings. **Device-verified on the iPad:** live `computeRoutes` request succeeds, blue polyline draws, preview camera frames it — Routes API confirmed enabled + authorised (§3). §5 item 26. |
 | `973ffc9` | **Map "M2": destination search** (search + destination selection only — no routing, navigation, or Apple Maps; dashboard / connection / relay untouched). Adds the **Google Places SDK** (`GooglePlaces` product, `ios-places-sdk` SPM, up-to-next-major from 11.1.0, Dash target only). New **`PlaceSearchService`** protocol — deliberately separate from `MapProvider` — with `GooglePlaceSearchService` (the only new `import GooglePlaces` file besides `GooglePlacesConfiguration`): autocomplete + Place Details (New) + one lazy `GMSAutocompleteSessionToken` per run, GMS errors mapped to `PlaceSearchError`. SDK-free: `Destination` / `PlaceSuggestion`, `DestinationStore` (source of truth for the chosen `Destination?`), `PlaceSearchViewModel` (debounce → suggestions → `resolve` → `onDestinationChosen`), custom `MapSearchView` (field + list + selected-destination chip). `MapViewModel.setDestination(_:)` drops a `MapMarker`, frames vehicle + destination via `MapCameraPlan.fit`, and toggles `.destinationPreview` ⟷ `.cruising`. `ContentView` composes map + search + store (none reference each other). `GooglePlacesConfiguration.bootstrap()` reuses the Maps key. Also in this commit: the M1 rendering-boundary widening (row below), and a follow-up `MapSearchView` styling fix — the suggestion-row secondary line + distance were invisible (`.foregroundStyle(.secondary)` / `.tertiary` wash out over `.regularMaterial`), changed to `Color(uiColor: .systemGray)`. Tests: new `PlaceSearchTests`, `MapContentTests` +M2 cases. Build clean; full `DashTests` green. **"Places API (New)" is enabled; autocomplete + the suggestion list are device-verified (§3). Place Details resolve / pin / preview camera still device-unverified (§6).** §5 item 25. |
 | `973ffc9` | **Map "M1": widen the rendering boundary** (committed together with M2, above — architecture only — no new SDKs/APIs, no search/routing/navigation/Apple Maps, no dashboard/connection changes; existing behaviour preserved). `MapProvider` goes from `makeMapView(camera:)` to `makeMapView(content: MapContent, onEvent:)` — SDK-neutral render state in, `MapEvent` out — and is kept **rendering-only** (search/routing become separate service abstractions later). New small SDK-neutral types: `MapGeometry` (`MapCoordinate`, `MapCoordinateBounds`), `MapCameraPlan` (`.follow` / `.fit`), `MapContent` (camera / vehicle / polylines / markers), `MapOverlay` (`MapPolyline`, `MapMarker`), `MapEvent` (+ `MapPOI`, `MapCameraPosition`), `MapMode`. `MapViewModel` gains `mode` / `setMode` / `handle(_:)` (no-op seam) and assembles `MapContent`. `GoogleMapProvider` becomes a `GMSMapViewDelegate` with `MapContent` diffing + keyed overlay dicts; still the only `import GoogleMaps` Map file. Fixed the two pre-existing `MapViewModel` main-actor warnings. Tests: new `MapContentTests` (10 — `MapCoordinateBounds` math + `MapViewModel` content/mode); existing `MapCameraStateTests` / `MapViewModelTests` unchanged and green. Build clean; full `DashTests` green (82). §5 item 24. |
@@ -1606,10 +1721,29 @@ Git history on `main` (newest first):
   The Routes API is confirmed **enabled + authorised** on the project. Diagnosed
   with a temporary `NSLog` that logged the 403 body (since removed). Committed
   `28b5be5`.
-- **Map M4.1 — automated only so far; device verification in progress.** +12
-  unit tests cover `LocationPacket` → `VehicleIndicator` (heading validation) and
-  the `GoogleMapProvider.vehicleStyle` dot-vs-pointer decision. **Not yet seen on
-  a screen:** the blue dot, the rotating pointer, the pointer following
-  `LocationPacket.heading`, the indicator moving with new fixes, and its visual
-  distinctness from the (red) destination pin + (blue) route line. Full checklist
-  in the M4.1 report.
+- **Map M4.1 — device-verified.** On the physical iPad the blue dot / rotating
+  pointer rendered, followed `LocationPacket.heading`, moved with new fixes, and
+  read as visually distinct from the red destination pin and the blue route line.
+  +12 unit tests cover `LocationPacket` → `VehicleIndicator` (heading validation)
+  and the `GoogleMapProvider.vehicleStyle` dot-vs-pointer decision. Committed
+  `8255749`.
+- **Map M4.2 — partially device-verified; gesture detection reworked after a
+  device finding.** +20 unit tests (`CameraFollowTests`) cover
+  follow-on-by-default, a user pan disabling follow, **a tiny sub-metre / 0.01-
+  zoom user gesture still disabling follow**, a programmatic idle *not* disabling
+  it, a programmatic move interleaved with a gesture not clearing the latch,
+  `recenter()` restoring follow to the latest fix, the `.destinationPreview`
+  one-shot fit staying put, and the `.navigating` camera plan shape.
+  **Device finding (2026-09-02):** the first M4.2 build used a distance/zoom
+  threshold (`isMeaningfulMove`) to decide if a gesture was "real"; on the iPad,
+  dragging did not reliably drop follow and small/fast pinch-zooms slipped
+  through. Fixed by removing the threshold entirely — any gesture GMS reports via
+  `willMove(byGesture:)` now drops follow, latched so a mid-gesture follow
+  animation can't mask it. The fixed build is installed on the iPad for re-check
+  against the §5 item 28 / M4.2-report checklist (cruising follow, any-size
+  pan/zoom dropping follow + showing recenter, GPS fixes moving the vehicle not
+  the camera while dropped, recenter restoring, preview + route still correct,
+  M4.1 indicator unchanged).
+  **`.navigating` camera framing remains device-unverified** — nothing in the
+  current UI calls `setMode(.navigating)`, so there is no flow to enter it; a
+  "start navigation" flow is a later M4 task.

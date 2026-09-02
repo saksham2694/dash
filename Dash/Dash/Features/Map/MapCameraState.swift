@@ -5,11 +5,15 @@
 //  What the map camera should be showing, expressed in SDK-neutral terms (plain
 //  numbers). No GoogleMaps or MapKit types appear here.
 //
-//  Two shapes of camera intent are modelled:
-//    - `MapCameraState` — a concrete position (centre / heading / zoom), used to
-//      follow the vehicle. This is the only case exercised today.
-//    - `MapCameraPlan.fit` — "frame this region", resolved by the provider against
-//      its own viewport size. Used for route preview in a later milestone.
+//  Shapes of camera intent modelled:
+//    - `MapCameraPlan.follow` — centre on a concrete `MapCameraState`
+//      (centre / heading / zoom); the cruising vehicle-follow case.
+//    - `MapCameraPlan.fit` — "frame this region", resolved by the provider
+//      against its own viewport size; the route-preview case (M3).
+//    - `MapCameraPlan.navigation` — like `follow` but tilted and with the focal
+//      point pushed down so the vehicle sits below centre and more map is
+//      visible ahead; the `.navigating` case (M4.2). Still SDK-neutral — the
+//      provider turns the pitch / below-centre fraction into its own camera.
 //
 
 import DashShared
@@ -59,10 +63,16 @@ nonisolated struct MapCameraState: Equatable, Sendable {
 /// How the provider should place its camera on the next render.
 nonisolated enum MapCameraPlan: Equatable, Sendable {
 
-    /// Centre on a concrete position — the vehicle-following case.
+    /// Centre on a concrete position — the cruising vehicle-follow case.
     case follow(MapCameraState)
 
     /// Frame a region with `padding` points of inset on every edge. The provider
     /// computes the centre and zoom from its own viewport. Used for route preview.
     case fit(MapCoordinateBounds, padding: Double)
+
+    /// Navigation framing (M4.2): centre on `state`, tilt the camera by
+    /// `pitchDegrees`, and shift the focal point down by `focusBelowCentre` of
+    /// the viewport height so the vehicle sits below centre with more map ahead.
+    /// The provider renders `state.headingDegrees` as the camera bearing.
+    case navigation(MapCameraState, pitchDegrees: Double, focusBelowCentre: Double)
 }

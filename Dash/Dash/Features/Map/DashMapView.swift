@@ -33,5 +33,14 @@ struct DashMapView: View {
             .onChange(of: location) { _, newLocation in
                 viewModel.update(with: newLocation)
             }
+            // M4.2 — shown only when the user has panned away and follow is off.
+            .overlay(alignment: .bottomTrailing) {
+                if viewModel.showsRecenterButton {
+                    RecenterButton { viewModel.recenter() }
+                        .padding(16)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.15), value: viewModel.showsRecenterButton)
     }
 }

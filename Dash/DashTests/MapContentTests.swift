@@ -62,10 +62,12 @@ struct MapViewModelContentTests {
         )
     }
 
-    @Test("starts cruising with no overlays, a follow camera and a heading-less vehicle")
+    @Test("starts cruising, following, with no overlays, a follow camera and a heading-less vehicle")
     func initialState() {
         let vm = MapViewModel()
         #expect(vm.mode == .cruising)
+        #expect(vm.followsVehicle)
+        #expect(vm.showsRecenterButton == false)
         #expect(vm.content.polylines.isEmpty)
         #expect(vm.content.markers.isEmpty)
         #expect(vm.content.camera == .follow(.default))
@@ -127,18 +129,22 @@ struct MapViewModelContentTests {
         #expect(vm.camera.zoom == zoom)
     }
 
-    @Test("setMode changes the mode; non-cruising modes still yield a valid follow camera for now")
-    func setModeFallsBackToFollow() {
+    @Test("setMode: preview with no destination falls back to follow; navigating uses the navigation plan")
+    func setModeCameraPlans() {
         let vm = MapViewModel()
         vm.update(with: packet(latitude: 9, longitude: 9))
 
-        vm.setMode(.destinationPreview)
+        vm.setMode(.destinationPreview) // no destination set → fall back
         #expect(vm.mode == .destinationPreview)
         #expect(vm.content.camera == .follow(vm.camera))
 
         vm.setMode(.navigating)
         #expect(vm.mode == .navigating)
-        #expect(vm.content.camera == .follow(vm.camera))
+        #expect(vm.content.camera == .navigation(
+            vm.camera,
+            pitchDegrees: MapViewModel.navigationPitchDegrees,
+            focusBelowCentre: MapViewModel.navigationFocusBelowCentre
+        ))
     }
 
     private func destination(
@@ -213,8 +219,8 @@ struct MapViewModelContentTests {
         #expect(vm.content.markers.first?.title == nil)
     }
 
-    @Test("map events are accepted and do not mutate render state yet")
-    func eventsAreInert() {
+    @Test("tap events and programmatic camera-idle do not mutate render state or follow")
+    func inertEvents() {
         let vm = MapViewModel()
         vm.update(with: packet(latitude: 3, longitude: 4))
         let before = vm.content
@@ -224,9 +230,10 @@ struct MapViewModelContentTests {
         vm.handle(.tappedMarker(id: "dest"))
         vm.handle(.cameraIdle(
             MapCameraPosition(center: MapCoordinate(latitude: 2, longitude: 2), zoom: 15, headingDegrees: 90),
-            byUserGesture: true
+            byUserGesture: false // programmatic
         ))
 
         #expect(vm.content == before)
+        #expect(vm.followsVehicle)
     }
 }

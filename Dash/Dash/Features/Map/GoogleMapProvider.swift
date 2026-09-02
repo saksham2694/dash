@@ -41,6 +41,28 @@ struct GoogleMapProvider: MapProvider {
         }
         return .locationDot
     }
+
+    /// Tracks whether the camera movement settling right now was driven by the
+    /// user (M4.2). GMS reports `willMove(byGesture:)` before every camera
+    /// change; a user pan/zoom/rotate latches this on and `idleAt` consumes it.
+    /// The latch is deliberate: a programmatic follow animation can fire
+    /// *between* a gesture starting and the camera going idle, reporting
+    /// `byGesture: false` — that must not erase the fact that the user is
+    /// interacting. There is no distance or zoom threshold: any real gesture,
+    /// however small, ends up reported as user-driven. Pure and SDK-free.
+    nonisolated struct UserGestureLatch: Equatable {
+        private(set) var isUserDriven = false
+
+        mutating func willMove(byGesture: Bool) {
+            if byGesture { isUserDriven = true }
+        }
+
+        /// Read the latch and clear it — call once per `idleAt`.
+        mutating func consumeOnIdle() -> Bool {
+            defer { isUserDriven = false }
+            return isUserDriven
+        }
+    }
 }
 
 /// Bridges `GMSMapView` into SwiftUI. Private: no GMS type escapes this file.
@@ -91,7 +113,8 @@ private struct GoogleMapContainer: UIViewRepresentable {
         private var routeLines: [String: GMSPolyline] = [:]
         private var pins: [String: GMSMarker] = [:]
         private var applied: MapContent?
-        private var gestureInProgress = false
+        /// Whether the camera settling now was driven by the user (M4.2).
+        private var gestureLatch = GoogleMapProvider.UserGestureLatch()
 
         init(onEvent: @escaping (MapEvent) -> Void) {
             self.onEvent = onEvent
@@ -122,20 +145,18 @@ private struct GoogleMapContainer: UIViewRepresentable {
         private func applyCamera(_ plan: MapCameraPlan, to mapView: GMSMapView, animated: Bool) {
             switch plan {
             case .follow(let state):
-                let position = GMSCameraPosition(
-                    latitude: state.latitude,
-                    longitude: state.longitude,
-                    zoom: Float(state.zoom),
-                    bearing: state.headingDegrees ?? 0,
-                    viewingAngle: 0
-                )
-                if animated {
-                    mapView.animate(to: position)
-                } else {
-                    mapView.camera = position
-                }
+                mapView.padding = .zero
+                move(mapView, to: state, pitch: 0, animated: animated)
+
+            case .navigation(let state, let pitch, let belowCentre):
+                // Push the visual centre down so the vehicle sits below it and
+                // more road ahead is on screen.
+                let inset = max(0, mapView.bounds.height * CGFloat(belowCentre))
+                mapView.padding = UIEdgeInsets(top: 0, left: 0, bottom: inset, right: 0)
+                move(mapView, to: state, pitch: pitch, animated: animated)
 
             case .fit(let bounds, let padding):
+                mapView.padding = .zero
                 let gmsBounds = GMSCoordinateBounds(
                     coordinate: Self.coordinate(bounds.southWest),
                     coordinate: Self.coordinate(bounds.northEast)
@@ -146,6 +167,21 @@ private struct GoogleMapContainer: UIViewRepresentable {
                 } else {
                     mapView.moveCamera(update)
                 }
+            }
+        }
+
+        private func move(_ mapView: GMSMapView, to state: MapCameraState, pitch: Double, animated: Bool) {
+            let position = GMSCameraPosition(
+                latitude: state.latitude,
+                longitude: state.longitude,
+                zoom: Float(state.zoom),
+                bearing: state.headingDegrees ?? 0,
+                viewingAngle: pitch
+            )
+            if animated {
+                mapView.animate(to: position)
+            } else {
+                mapView.camera = position
             }
         }
 
@@ -252,23 +288,19 @@ private struct GoogleMapContainer: UIViewRepresentable {
         // MARK: - GMSMapViewDelegate
 
         func mapView(_ mapView: GMSMapView, willMove gesture: Bool) {
-            gestureInProgress = gesture
+            gestureLatch.willMove(byGesture: gesture)
         }
 
         func mapView(_ mapView: GMSMapView, idleAt position: GMSCameraPosition) {
-            let byUser = gestureInProgress
-            gestureInProgress = false
-            onEvent(.cameraIdle(
-                MapCameraPosition(
-                    center: MapCoordinate(
-                        latitude: position.target.latitude,
-                        longitude: position.target.longitude
-                    ),
-                    zoom: Double(position.zoom),
-                    headingDegrees: position.bearing
+            let settled = MapCameraPosition(
+                center: MapCoordinate(
+                    latitude: position.target.latitude,
+                    longitude: position.target.longitude
                 ),
-                byUserGesture: byUser
-            ))
+                zoom: Double(position.zoom),
+                headingDegrees: position.bearing
+            )
+            onEvent(.cameraIdle(settled, byUserGesture: gestureLatch.consumeOnIdle()))
         }
 
         func mapView(_ mapView: GMSMapView, didTapAt coordinate: CLLocationCoordinate2D) {

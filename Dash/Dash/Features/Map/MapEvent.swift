@@ -40,7 +40,9 @@ nonisolated enum MapEvent: Equatable, Sendable {
     /// The user tapped one of our `MapMarker`s (by `id`).
     case tappedMarker(id: String)
 
-    /// The camera stopped moving. `byUserGesture` distinguishes a pan/zoom the
-    /// user drove from a programmatic move the app drove.
+    /// The camera stopped moving. `byUserGesture` is `true` whenever a user
+    /// pan / zoom / rotate gesture moved the camera — however small (M4.2);
+    /// programmatic camera moves report `false`. `MapViewModel` uses it to drop
+    /// vehicle-follow.
     case cameraIdle(MapCameraPosition, byUserGesture: Bool)
 }
