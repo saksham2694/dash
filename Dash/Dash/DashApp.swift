@@ -23,6 +23,11 @@ struct DashApp: App {
     /// lifetime; declared in `FeatureRegistry.makeDefault()`.
     @StateObject private var registry: FeatureRegistry
 
+    /// Persisted widget-dashboard arrangement. Seeded with a starter layout for
+    /// the Map feature (the shell stays feature-agnostic; the seed is wired
+    /// here, next to the feature registry).
+    @StateObject private var dashboardLayout: DashboardLayoutStore
+
     init() {
         // Hand the Google Maps + Places SDKs their API key before any map view
         // or place lookup happens.
@@ -35,6 +40,7 @@ struct DashApp: App {
         _knownDevices = StateObject(wrappedValue: known)
         _connection = StateObject(wrappedValue: ConnectionCoordinator(locationStore: store, knownDevices: known))
         _registry = StateObject(wrappedValue: .makeDefault())
+        _dashboardLayout = StateObject(wrappedValue: DashboardLayoutStore(seed: .starter(featureID: MapFeature.id)))
     }
 
     var body: some Scene {
@@ -44,6 +50,7 @@ struct DashApp: App {
                 .environmentObject(connection)
                 .environmentObject(knownDevices)
                 .environmentObject(registry)
+                .environmentObject(dashboardLayout)
                 .task { connection.startSession() }
         }
     }

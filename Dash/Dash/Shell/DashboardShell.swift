@@ -9,10 +9,12 @@
 //  Shown by `RootView` whenever Dash is connected, in place of the old
 //  full-screen map view.
 //
-//  Scope so far: the shell/feature seam. The Home launcher is a simple
-//  placeholder, the Dashboard space is a placeholder (the widget grid is
-//  M5.2), and the only feature that opens full-screen is Map — via
-//  `MapFeature.makeFullScreenView()`, whose runtime state is app-scoped (M5.1).
+//  Scope so far: the shell/feature seam + the widget dashboard grid (M5.2.0).
+//  The Home launcher is still a simple placeholder. The Dashboard space
+//  (`DashboardSpaceView`) renders the persisted `DashboardLayout`; feature
+//  components are still placeholders until M5.2.1. The only feature that opens
+//  full-screen is Map — via `MapFeature.makeFullScreenView()`, whose runtime
+//  state is app-scoped (M5.1).
 //
 
 import SwiftUI
@@ -21,8 +23,12 @@ struct DashboardShell: View {
 
     @EnvironmentObject private var connection: ConnectionCoordinator
     @EnvironmentObject private var registry: FeatureRegistry
+    @EnvironmentObject private var layoutStore: DashboardLayoutStore
 
     @StateObject private var shell = ShellStore()
+
+    /// The one grid the dashboard lays out on. Swappable in a single place.
+    private let grid = DashboardGrid.standard
 
     var body: some View {
         HStack(spacing: 0) {
@@ -55,8 +61,14 @@ struct DashboardShell: View {
                 manifests: registry.manifests,
                 onOpen: { shell.openApp($0) }
             )
-        case .dashboard:
-            DashboardPlaceholderView()
+        case .dashboard(let pageIndex):
+            DashboardSpaceView(
+                layoutStore: layoutStore,
+                registry: registry,
+                grid: grid,
+                requestedPage: pageIndex,
+                onSelectPage: { shell.goToPage($0) }
+            )
         case .app(let id):
             if let feature = registry.feature(id) {
                 feature.makeFullScreenView()

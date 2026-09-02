@@ -6,41 +6,40 @@ without conversation history.
 
 - **Last updated:** 2026-09-03
 - **Branch:** `main`
-- **Latest commit:** `678e478 feat(map): add route alternatives` — Map **M4.5**
-  (multiple route options + manual route refresh, §5 item 31).
-- **Everything through M4.5 is committed.** Connection/pairing/relay-status →
+- **Latest commit:** `e8e913f refactor(map): make map state app-scoped` — dashboard
+  **M5.1** (the Map feature's runtime state is now app-scoped so it survives
+  leaving/returning to Maps, §5 item 33).
+- **Everything through M5.1 is committed.** Connection/pairing/relay-status →
   `9a02364` / `ec4d4a9` / `c3a3a18`; Map **M1** + **M2** → `973ffc9`; **M3** →
   `28b5be5` (Routes API device-verified; carries the `X-Ios-Bundle-Identifier`
   header); **M4.1** → `8255749`; **M4.2** → `d8b291e`; **M4.3** → `a262a9c`;
-  **M4.4** → `4697557`; **M4.5** → `678e478`. See §10 for the mapping.
-- **Working tree (not yet committed):** **Map "M4.6" — smart off-route detection
-  + automatic rerouting** (with the 2026-09-03 physical-test refinement folded
-  in). New pure `OffRouteDetector` (in `Routing/`, reuses `RouteGeometry.project`):
-  classifies each fix `onRoute` / `possiblyOffRoute` / `confirmedOffRoute` behind
-  named conservative thresholds — **`onRouteToleranceMeters` 20 /
-  `offRouteThresholdMeters` 35** (hysteresis band between them) **/
-  `confirmationFixCount` 3** consecutive meaningful off-route fixes / re-signal
-  after 8 (tightened from 40 / 70 / 4 after a real drive — catches a wrong turn a
-  road-width sooner, still can't fire on one or two noisy fixes) — and raises a
-  **once-per-episode** signal. `NavigationViewModel` owns the detector, feeds it
-  every fix from `update(with:)`, exposes `offRouteStatus` +
-  `needsAutomaticReroute`, and re-arms it on any route change (`start` /
-  `reroute` / `stop`). `RouteViewModel.autoReroute(from:)` recomputes from the
-  **current** location to the remembered destination through the *same* `refresh`
-  field / task as the manual Refresh (so the two can never run at once or double
-  up), flagged **`@Published refreshWasAutomatic`**; the derived
-  **`isAutomaticallyRecalculating`** is set *synchronously* the instant the
-  request starts (not after the API responds) and drives a small non-blocking
-  **"Recalculating…"** pill that snaps in under the maneuver card. A cooldown
-  (`autoRerouteCooldownSeconds` 25, from the last automatic run's completion)
-  keeps it off the Routes API — the manual Refresh ignores it. `ContentView`
-  turns a confirmed signal into `autoReroute(...)`, and on success **adopts the
-  recommended route** (`NavigationViewModel.reroute` + `MapViewModel.selectRouteOption`
-  + progress re-seed) while keeping destination / mode / vehicle and leaving the
-  alternatives in `MapViewModel.routeOptions`; on failure the session is left
-  intact and the pill becomes "Couldn't recalculate — keeping current route".
-  **No** traffic-aware routing, traffic colours, continuous polling, voice
-  guidance, or dashboard work. See §5 item 32, §10.
+  **M4.4** → `4697557`; **M4.5** → `678e478`; **M4.6** → `73879e7`;
+  dashboard shell **M5.0** → `258ffde`; dashboard **M5.1** → `e8e913f`. See §10
+  for the mapping.
+- **Working tree (not yet committed):** **Dashboard "M5.2.0" — the widget-grid
+  layout foundation** (§5 item 34). New `Shell/Dashboard/`: an SDK-neutral
+  `Codable` **`DashboardLayout`** (ordered pages → ordered `WidgetPlacement`s,
+  each `{ id: UUID, featureID, size: ComponentSize, origin: GridPoint }`),
+  **`DashboardGrid`** (the fixed **6 × 4** cell grid + the `ComponentSize` →
+  cell-footprint mapping — `.compact` 2×1 / `.medium` 3×2 / `.large` 6×2), a pure
+  **`DashboardLayoutValidator`** (structural: duplicate ids / non-widget size /
+  out-of-bounds / per-page overlap; registry-aware: unknown feature / unsupported
+  size), and **`DashboardLayoutStore`** — `@MainActor ObservableObject` persisting
+  a schema-versioned JSON envelope under **`shell.dashboardLayout.v1`** in
+  `UserDefaults`, falling back to the injected seed on missing / undecodable /
+  wrong-version / structurally-invalid data. **`DashboardSpaceView`** replaces
+  `DashboardPlaceholderView`: it reads the store, resolves each placement's
+  `featureID` through `FeatureRegistry`, calls `DashFeature.makeComponentView(size:)`
+  (still a labelled placeholder for Maps until M5.2.1), absolute-positions widgets
+  on the grid, and offers simple prev/next + page dots. `DashApp` seeds
+  `DashboardLayoutStore` with **`DashboardLayout.starter(featureID: MapFeature.id)`**
+  — a **two-page Maps-only** layout (page 1: large + medium + compact; page 2:
+  large + medium) proving multi-size / multi-position / multi-page. `DashboardShell`
+  owns the grid constant and the `.dashboard(page:)` → `DashboardSpaceView` wiring;
+  it still has **zero** references to `MapViewModel` / `RouteViewModel` /
+  `NavigationViewModel`. **No** Map component rendering, no editing / drag / resize,
+  no Speedometer / Music / `ThemeManager`. Full suite **347/347**, build clean,
+  **device-verified on the physical iPad**. See §5 item 34, §10.
 - **Authoritative requirements:** `PROJECT_SPEC.pdf` (repo root) — "iPad CarPlay-style Dashboard — Project Spec"
 - **Day-to-day guidance:** `CLAUDE.md` (repo root)
 
@@ -107,9 +106,8 @@ dash/
     │   ├── GoogleMapsService.xcconfig          # git-ignored, holds the real API key
     │   └── GoogleMapsService.xcconfig.template # committed template
     ├── Dash/                        # iPad app target
-    │   ├── DashApp.swift            # @main; owns LocationStore + ConnectionCoordinator + KnownDeviceStore; bootstraps Google Maps + Places
-    │   ├── RootView.swift           # connection gate: ContentView (+ ConnectedControlView overlay) when isConnected, else ConnectionSetupView
-    │   ├── ContentView.swift        # Map-feature composition: DashMapView + MapSearchView overlay; owns MapViewModel + PlaceSearchViewModel + DestinationStore + RouteViewModel + NavigationViewModel; wires the M4.6 off-route signal → auto-reroute + recommended-route adoption (placeholder shell, not the dashboard)
+    │   ├── DashApp.swift            # @main; owns LocationStore + ConnectionCoordinator + KnownDeviceStore + FeatureRegistry + DashboardLayoutStore; bootstraps Google Maps + Places
+    │   ├── RootView.swift           # connection gate: DashboardShell when isConnected, else ConnectionSetupView
     │   ├── Info.plist               # NSBonjourServices, GoogleMapsAPIKey = $(GOOGLE_MAPS_API_KEY)
     │   ├── Configuration/
     │   │   ├── GoogleMapsConfiguration.swift   # reads key from Info.plist, calls GMSServices.provideAPIKey; also exposes `apiKey`
@@ -123,10 +121,28 @@ dash/
     │   │   ├── ConnectionState.swift           # enum: disconnected / discovering / connecting / connected
     │   │   ├── ConnectionCoordinator.swift     # session layer: owns the transport, bridges pairing→connection (prefer paired, ignore strangers), feeds LocationStore
     │   │   └── KnownDeviceStore.swift          # pairing / known-device persistence (KnownRelay, keyed by stable relay id); pairedRelay convenience
+    │   ├── Shell/                             # M5 — the CarPlay-style shell (SwiftUI + Foundation only; NO Map internals)
+    │   │   ├── DashboardShell.swift            # M5.0 — the single layout/navigation owner: persistent SidebarView + content switching on ShellSurface (Home / Dashboard / full-screen app); owns the DashboardGrid constant
+    │   │   ├── ShellSurface.swift              # M5.0 — enum: home(page) / dashboard(page) / app(FeatureID); Codable, defaultSurface
+    │   │   ├── ShellStore.swift                # M5.0 — @MainActor ObservableObject: surface, sidebarCollapsed, returnSurface; showHome/showDashboard/goToPage/openApp/closeApp/toggleSidebar (pure, feature-agnostic)
+    │   │   ├── SidebarView.swift               # M5.0 — persistent nav rail (Home / Dashboard / one button per registered feature) + ConnectedControlView pinned at the bottom (presentational; takes FeatureManifests only)
+    │   │   ├── HomePlaceholderView.swift       # M5.0 — simple app-tile launcher: a tile per registered feature + "coming soon" tiles (real multi-page/reorder launcher is later)
+    │   │   └── Dashboard/                      # M5.2.0 — the widget dashboard (SDK-neutral except the SwiftUI view)
+    │   │       ├── DashboardGrid.swift         # GridPoint / GridSpan / GridRect (half-open rect + intersects); DashboardGrid (.standard = 6×4) + span(for: ComponentSize) footprint mapping + rect(for:) + contains(_:)
+    │   │       ├── DashboardLayout.swift       # Codable value types: WidgetPlacement (id: UUID, featureID, size, origin) / DashboardPage / DashboardLayout (pages, page(at:), allPlacements); DashboardLayout.starter(featureID:) — the two-page Maps seed
+    │   │       ├── DashboardLayoutValidator.swift  # pure: validate(_:grid:) structural (dup id / non-widget size / out-of-bounds / per-page overlap) + @MainActor validate(_:grid:registry:) (unknown feature / unsupported size); DashboardLayoutIssue
+    │   │       ├── DashboardLayoutStore.swift  # @MainActor ObservableObject; loads/persists a { version, layout } JSON envelope under "shell.dashboardLayout.v1" in UserDefaults; falls back to the injected seed on missing/undecodable/wrong-version/structurally-invalid; replace(with:) / resetToDefault()
+    │   │       └── DashboardSpaceView.swift    # replaces DashboardPlaceholderView: reads DashboardLayoutStore, resolves featureID via FeatureRegistry → DashFeature.makeComponentView(size:), absolute-positions widgets on the grid, prev/next + page dots; WidgetHostView + UnresolvedWidgetView fallback
+    │   ├── Features/
+    │   │   ├── DashFeature.swift               # M5.0 — FeatureID (= String) + FeatureManifest (id, title, symbolName, supportedSizes, defaultSize) + @MainActor protocol DashFeature { manifest; makeFullScreenView() -> AnyView; makeComponentView(size:) -> AnyView }
+    │   │   ├── ComponentSize.swift             # M5.0 — enum compact/medium/large/full; widgetSizes; isWidget
+    │   │   └── FeatureRegistry.swift           # M5.0 — @MainActor ObservableObject: ordered [any DashFeature] + feature(_:) lookup + duplicateIDs(in:) (precondition on init); FeatureRegistry.makeDefault() = the one place the feature set is declared ([MapFeature()])
     │   ├── Features/Connection/
     │   │   ├── ConnectionSetupView.swift       # not-connected / setup screen: device picker + "name this iPhone" prompt, "looking for <paired>", "Stop Searching", Forget <name> (presentational)
-    │   │   └── ConnectedControlView.swift      # compact overlay shown on the dashboard while connected: names the iPhone, offers Disconnect / Forget (presentational)
+    │   │   └── ConnectedControlView.swift      # compact control shown in the shell sidebar while connected: names the iPhone, offers Disconnect / Forget (presentational)
     │   └── Features/Map/                       # all SDK-neutral except GoogleMapProvider.swift
+    │       ├── MapFeature.swift                # M5.0/M5.1 — the ONLY bridge between Shell/ and Map internals: app-scoped owner of MapViewModel + DestinationStore + PlaceSearchViewModel + RouteViewModel + NavigationViewModel; makeFullScreenView() → a cached AnyView(MapFullScreenView); makeComponentView() → placeholder (M5.2.1 replaces it)
+    │       ├── MapFullScreenView.swift         # was ContentView until M5.1 — the full-screen Map: DashMapView + MapSearchView overlay; OBSERVES MapFeature's view models (no @StateObject); wires them together + the M4.6 off-route signal → auto-reroute + recommended-route adoption
     │       ├── MapProvider.swift               # rendering-only protocol (MapContent in, MapEvent out) + MapProviderID
     │       ├── MapGeometry.swift               # MapCoordinate + MapCoordinateBounds (tightest-box math)
     │       ├── MapCameraState.swift            # camera value type + following(_:); MapCameraPlan (.follow / .fit / .navigation(pitch, vehicleVerticalAnchor))
@@ -167,8 +183,10 @@ dash/
     │           ├── RouteInfoPanelView.swift    # M4.4 — bottom 3-stat panel (distance · time · ETA); preview vs live look (presentational)
     │           ├── RouteOptionsPanelView.swift # M4.5 — compact route-option chips (duration/distance/label); preview selector + nav-refresh selector (presentational)
     │           └── StartNavigationButton.swift # "Start Navigation" action over the route preview (presentational)
+    │   # The CarPlay-style shell now lives in Shell/ (M5.0–M5.2.0); the spec's
+    │   # "Home/DashboardView" is realised as DashboardShell + Shell/Dashboard/.
     │   # (spec-planned but NOT present: Models/, Features/Music, Features/Speedometer,
-    │   #  Features/Settings, Home/DashboardView, Core/ThemeManager)
+    │   #  Features/Settings, Core/ThemeManager)
     ├── DashTests/                   # Swift Testing
     │   ├── LocationReceiverTests.swift
     │   ├── PacketLineBufferTests.swift
@@ -187,6 +205,12 @@ dash/
     │   ├── NavigationTests.swift              # M4.3: RouteGeometry, progress engine, NavigationViewModel (+ M4.5 reroute), ManeuverCard, nav camera/zoom; + M4.4 remainingPolyline + route-clip rendering + camera anchor
     │   ├── RouteInfoTests.swift               # M4.4: RouteFormat (distance/duration/clock), Duration.inSeconds, remainingDuration, RouteInfo preview/remaining, NavigationViewModel.routeInfo
     │   ├── OffRouteTests.swift                # M4.6: OffRouteDetector classification/hysteresis/re-signal, RouteViewModel.autoReroute (current origin, cooldown, no-concurrency w/ manual), NavigationViewModel off-route signal, reroute adoption
+    │   ├── ComponentSizeTests.swift           # M5.0: widgetSizes / isWidget / Codable
+    │   ├── ShellStoreTests.swift              # M5.0: ShellSurface (cases/page/Codable) + ShellStore navigation (openApp→closeApp returns to prior surface, space nav, sidebar toggle)
+    │   ├── FeatureRegistryTests.swift         # M5.0: lookup, order, duplicateIDs detection, default registry registers Map
+    │   ├── MapFeatureTests.swift              # M5.0/M5.1: manifest; app-scoped ownership — presenting MapFullScreenView observes the feature's view models, an active nav session survives re-presentation
+    │   ├── DashboardLayoutTests.swift         # M5.2.0: model + identity + Codable round-trip; DashboardGrid spans/bounds/intersects; DashboardLayoutValidator (structural + registry-aware; the shipped starter validates clean)
+    │   ├── DashboardLayoutStoreTests.swift    # M5.2.0: default seeding, persistence round-trip, corrupt / wrong-version / structurally-invalid → seed fallback, resetToDefault; DashboardSpaceView page clamp
     │   └── DashTests.swift          # scaffold `example()` — no-op, still present
     ├── DashUITests/                 # Xcode scaffold only, no real tests
     └── DashRelay/                   # iPhone app target
@@ -236,12 +260,14 @@ CLLocationManager                                LocationReceiver (NWBrowser "_d
                                                         ├─ @Published latestPacket / signal
                                                         └─ watchdog Task: no packet in staleInterval ⇒ signal = .stale
                                                                │
-                                                     RootView: ContentView (+ ConnectedControlView overlay:
-                                                     name / Disconnect / Forget) when isConnected,
-                                                     else ConnectionSetupView(model:) — device picker +
-                                                     "name this iPhone" prompt / "Looking for <paired>…" /
+                                                     RootView: DashboardShell when isConnected
+                                                     (sidebar w/ ConnectedControlView: name / Disconnect /
+                                                     Forget), else ConnectionSetupView(model:) — device
+                                                     picker / "name this iPhone" / "Looking for <paired>…" /
                                                      "Stop Searching" / "Forget <name>"
-                                                        → ContentView → DashMapView → MapViewModel → GoogleMapProvider
+                                                        → DashboardShell → (Home | DashboardSpaceView |
+                                                          MapFeature.makeFullScreenView() → MapFullScreenView
+                                                          → DashMapView → MapViewModel → GoogleMapProvider)
 ```
 
 Connection state (`disconnected/discovering/connecting/connected`) lives **only**
@@ -261,6 +287,12 @@ store and transport logic stays in the receiver.
 
 - **`LocationStore` is the only consumer of network data.** `LocationReceiver`
   pushes into it; features read from it. Nothing else opens a connection.
+- **The shell owns layout + navigation; features own content (M5).** A feature
+  is a `DashFeature` (manifest + `makeFullScreenView()` + `makeComponentView(size:)`)
+  and never references `Shell/`. `DashboardShell` is the single layout owner and
+  never references a Map view model. `MapFeature` is the *only* bridge between
+  `Shell/` and Map internals. `FeatureRegistry.makeDefault()` is the one place
+  the feature set is declared. See §5 items 33–34.
 - **Wire types live in `DashShared`.** `LocationPacket`, `LocationWireFormat`
   (service type + JSON/date strategy + `\n` framing) and now `RelayAdvertisement`
   (the Bonjour TXT-record contract: `rid` + `name`) are defined once. `DashRelay`
@@ -335,19 +367,20 @@ not replace their responsibilities.
   `LocationTracker`; `.stop()` stops it. `LocationTracker` also gained a
   `wantsTracking` gate so a late Core Location authorization callback can't
   re-`startUpdatingLocation()` after a deliberate stop.
-- **The dashboard is gated.** `RootView` shows `ContentView` (map/dashboard) only
-  when `ConnectionCoordinator.isConnected`; otherwise `ConnectionSetupView`. The
-  map is never shown without an active connection. `RootView` is the only place
-  that reads connection state for gating; `ContentView` and feature views never
-  see it. Both connection views are presentational and hold no copy of the
-  connection/pairing state:
+- **The dashboard is gated.** `RootView` shows `DashboardShell` (the M5 shell)
+  only when `ConnectionCoordinator.isConnected`; otherwise `ConnectionSetupView`.
+  The shell (and the map) is never shown without an active connection. `RootView`
+  is the only place that reads connection state for gating; `DashboardShell` and
+  feature views never see it. Both connection views are presentational and hold
+  no copy of the connection/pairing state:
   - `ConnectionSetupView` takes `ConnectionSetupView.Model` (state +
     `offerableRelays` + `pairedRelayName`) and closures (`onPair`, `onForget`,
     `onStopSearching`, `onSearch`). Its one bit of local state is the "name this
     iPhone" alert (presentation only).
-  - `ConnectedControlView` (overlaid on `ContentView` by `RootView` while
-    connected) takes the paired device name + `onDisconnect` / `onForget`
-    closures. Its one bit of local state is the confirmation dialog.
+  - `ConnectedControlView` (M5.0 moved it into `SidebarView`; `DashboardShell`
+    wires its closures to `ConnectionCoordinator`) takes the paired device name +
+    `onDisconnect` / `onForget` closures. Its one bit of local state is the
+    confirmation dialog.
 - **Pairing flow (iPad).** First launch: browse → if ≥1 relay is visible and
   nothing is paired, `ConnectionSetupView` lists them; the user taps one, is
   prompted to **name** it, and confirms → `ConnectionCoordinator.pairAndConnect(to:named:)`
@@ -528,11 +561,12 @@ not replace their responsibilities.
   `remember` / `forget` / `forgetAll` / `isKnown(id:)` / `pairedRelay` (first
   known). Still **storage only** — no networking; the coordinator decides *when*
   to call `remember` / `forget`.
-- **[Implemented]** `RootView` — gates the UI: when connected, `ContentView`
-  (dashboard) with a `ConnectedControlView` overlaid top-trailing; otherwise
-  `ConnectionSetupView`. Builds the setup screen's `Model` from the coordinator
-  and wires every action (`disconnect` / `startSession` /
-  `pairAndConnect(to:named:)` / `forgetPairedRelay`).
+- **[Implemented]** `RootView` — gates the UI: when connected, `DashboardShell`
+  (the M5 CarPlay-style shell — §5 items 33–34); otherwise `ConnectionSetupView`.
+  Builds the setup screen's `Model` from the coordinator and wires every action
+  (`disconnect` / `startSession` / `pairAndConnect(to:named:)` /
+  `forgetPairedRelay`). While connected, `DashboardShell` wires
+  `ConnectedControlView`'s Disconnect / Forget back to the coordinator.
 - **[Implemented]** `ConnectionSetupView` (`Features/Connection/`) — the
   connection/setup + **pairing** screen, shown whenever Dash is not connected.
   Presentational: takes `ConnectionSetupView.Model` (state + `offerableRelays` +
@@ -554,19 +588,20 @@ not replace their responsibilities.
   centred, `maxWidth: 460`) — iPad portrait + landscape and iPhone. Visuals
   still intentionally plain.
 - **[Implemented]** `ConnectedControlView` (`Features/Connection/`) — a compact
-  pill `RootView` overlays on the dashboard while connected. Shows the paired
-  iPhone's friendly name (`ConnectionCoordinator.pairedRelayDisplayName`, falling
-  back to "DashRelay") and, via a confirmation dialog, **Disconnect** (ends the
-  session, keeps the pairing → `disconnect()`) and **Forget `<name>`** (drops the
-  pairing → `forgetPairedRelay()`). Presentational; only local state is the
-  dialog. Does **not** touch `ContentView` or the map. `.overlay(alignment:
-  .topTrailing)` + `padding(12)` keeps it inside the safe area in both
-  orientations.
-- **[Implemented]** `DashApp` owns `LocationStore`, `KnownDeviceStore`, and
-  `ConnectionCoordinator` (constructed with the store + known-device store) as
-  `@StateObject`s, injects them as `environmentObject`s, calls
+  pill shown **in the shell sidebar** while connected (M5.0 moved it there from
+  the old `RootView` overlay). Shows the paired iPhone's friendly name
+  (`ConnectionCoordinator.pairedRelayDisplayName`, falling back to "DashRelay")
+  and, via a confirmation dialog, **Disconnect** (ends the session, keeps the
+  pairing → `disconnect()`) and **Forget `<name>`** (drops the pairing →
+  `forgetPairedRelay()`). Presentational; only local state is the dialog. Does
+  **not** touch the shell content or the map.
+- **[Implemented]** `DashApp` owns `LocationStore`, `KnownDeviceStore`,
+  `ConnectionCoordinator`, `FeatureRegistry` (`.makeDefault()`), and
+  `DashboardLayoutStore` (seeded `.starter(featureID: MapFeature.id)`) as
+  `@StateObject`s, injects them all as `environmentObject`s, calls
   `connection.startSession()` in `.task`, and `GoogleMapsConfiguration.bootstrap()`
-  in `init()`.
+  / `GooglePlacesConfiguration.bootstrap()` in `init()` (before the registry so
+  `MapFeature`'s SDK-backed services are constructed after the keys are set).
 - **[Implemented]** Map abstraction (widened in the "M1" pass — see §5 item 24):
   - `MapProvider` — **rendering-only** protocol: `id` +
     `makeMapView(content: MapContent, onEvent: @escaping (MapEvent) -> Void) -> AnyView`.
@@ -667,10 +702,13 @@ not replace their responsibilities.
   - `MapSearchView` — a custom SwiftUI search field + suggestions list, and a
     compact chip (name / address / clear button) once a destination is chosen.
     Presentational; no SDK, no map, no store.
-  - `ContentView` — the composition point: owns `MapViewModel`,
-    `PlaceSearchViewModel`, `DestinationStore`, `RouteViewModel` and
-    `NavigationViewModel`; wires
-    `searchVM.onDestinationChosen → destinationStore.select`,
+  - `MapFullScreenView` (was `ContentView` until M5.1) — the composition point.
+    The five view models (`MapViewModel`, `PlaceSearchViewModel`,
+    `DestinationStore`, `RouteViewModel`, `NavigationViewModel`) are **owned by
+    `MapFeature`** (app-scoped, M5.1) and only *observed* here; this view wires
+    them together and runs the `LocationStore` fix pump while on screen. Wiring:
+    `searchVM.onDestinationChosen → destinationStore.select` (this one moved to
+    `MapFeature.init`),
     `destinationStore.destination → mapVM.setDestination` + `routeVM.requestRoutes`
     (+ `navVM.stop()`), `routeVM.state (.loaded) → mapVM.setRouteOptions`, the
     vehicle coordinate → `searchVM.origin` / routing origin / `navVM.update` →
@@ -819,8 +857,8 @@ not replace their responsibilities.
     + road, a **Refresh** button (M4.5 — spinner while recalculating) + an "End"
     button) and its presentational model + distance formatter
     ("Now" / "220 m" / "1.4 km"). `StartNavigationButton` — the capsule action
-    shown over the route preview. Both presentational; `ContentView` owns their
-    visibility.
+    shown over the route preview. Both presentational; `MapFullScreenView` owns
+    their visibility.
 - **[Implemented]** `GoogleMapProvider` — the live Google Maps view, and the only
   Map file importing `GoogleMaps`. Wraps `GMSMapView` in a private
   `UIViewRepresentable`; the `Coordinator` owns the one vehicle-indicator
@@ -866,9 +904,10 @@ not replace their responsibilities.
   `GMSServices.provideAPIKey`; returns `false` and does nothing if unset. No key
   in source. `GooglePlacesConfiguration.bootstrap()` reuses the same `apiKey` for
   `GMSPlacesClient.provideAPIKey`. Both are called from `DashApp.init()`.
-- **[Implemented]** `ContentView` currently renders a full-screen `DashMapView`
-  with the `MapSearchView` + `RouteStatusView` overlay (temporary shell — this is
-  **not** the dashboard layout).
+- **[Implemented]** `MapFullScreenView` renders a full-screen `DashMapView` with
+  the `MapSearchView` + `RouteStatusView` overlay. It is now `MapFeature`'s
+  full-screen experience, opened from the shell's sidebar / Home; the dashboard
+  widget presentations at each `ComponentSize` are M5.2.1.
 - **[Verified · automated]** `PacketLineBufferTests` (9): single line, two lines
   per chunk, line split across chunks, partial trailing line held, blank lines
   ignored, malformed line skipped, oversized line dropped then recovers, `reset()`,
@@ -1104,7 +1143,7 @@ not replace their responsibilities.
   refresh. Committed `678e478`. +27 unit tests cover the selection / refresh /
   render state.
 - **[Not yet verified on device]** **M4.6** smart off-route detection +
-  automatic rerouting (working tree). On a real drive, still to confirm: the
+  automatic rerouting. Committed `73879e7`. On a real drive, still to confirm: the
   detector's thresholds behave on a genuine missed turn (confirm within a few
   fixes, no false trigger on a bad-GPS stretch); the automatic `computeRoutes`
   reroute fires; the recommended route is adopted mid-drive without restarting
@@ -1116,6 +1155,78 @@ not replace their responsibilities.
   "Recalculating…" pill now bound to a synchronously-set `@Published` state so it
   is visible for the whole request — both covered by new unit tests, still to see
   on a real drive.)*
+
+### CarPlay-style dashboard shell (M5.0 – M5.2.0)
+
+- **[Implemented · device-verified]** **M5.0 — shell / feature seam.** Committed
+  `258ffde`. `DashFeature` protocol + `FeatureManifest` + `FeatureRegistry`
+  (`makeDefault()` = the one place features are declared) + `ComponentSize`;
+  `ShellSurface` / `ShellStore` (pure navigation state — `home(page)` /
+  `dashboard(page)` / `app(FeatureID)`, `openApp`/`closeApp` returning to the
+  prior surface); `DashboardShell` (the single layout owner) with a persistent
+  `SidebarView` (Home / Dashboard / one button per feature; `ConnectedControlView`
+  moved here from the old `RootView` overlay), a placeholder `HomePlaceholderView`
+  launcher, and a placeholder dashboard. `RootView` now shows `DashboardShell`
+  (not the map) when connected. `MapFeature` wraps the existing full-screen Map.
+  +23 unit tests.
+- **[Implemented · device-verified]** **M5.1 — app-scoped Map state.** Committed
+  `e8e913f`. The five Map view models (`MapViewModel` / `DestinationStore` /
+  `PlaceSearchViewModel` / `RouteViewModel` / `NavigationViewModel`) moved from
+  `@StateObject`s inside the old `ContentView` onto `MapFeature`, which is held
+  for the app's lifetime by the `FeatureRegistry`. `ContentView` →
+  `MapFullScreenView`, which now only *observes* those instances. Result: leaving
+  and returning to Maps (Maps → Home → Maps) no longer resets an active route /
+  navigation session. `makeFullScreenView()` returns a cached `AnyView` so shell
+  `body` re-renders don't rebuild the map underneath a live session. Routing /
+  navigation algorithms unchanged. +6 unit tests (incl. "an active navigation
+  session is not recreated by re-presenting Maps").
+- **[Implemented · device-verified]** **M5.2.0 — dashboard layout foundation**
+  (§5 item 34; **working tree, not yet committed**). `Shell/Dashboard/`:
+  - **`DashboardGrid`** — the fixed **6 × 4** cell grid. The *shell* owns the
+    `ComponentSize` → footprint mapping: `.compact` = 2 × 1, `.medium` = 3 × 2,
+    `.large` = 6 × 2, `.full` = the whole grid (rejected as a widget). `GridPoint`
+    / `GridSpan` / `GridRect` (half-open rect + `intersects`); `contains(_:)`.
+  - **`DashboardLayout`** — SDK-neutral `Codable`: ordered `[DashboardPage]`, each
+    an ordered `[WidgetPlacement]` where a placement is
+    `{ id: UUID, featureID: FeatureID, size: ComponentSize, origin: GridPoint }`.
+    Placement identity is part of `Equatable` and round-trips through `Codable`.
+    `DashboardLayout.starter(featureID:)` builds the seed.
+  - **`DashboardLayoutValidator`** — pure. `validate(_:grid:)` (structural:
+    duplicate id / non-widget size / out-of-bounds / per-page overlap) and
+    `@MainActor validate(_:grid:registry:)` (adds unknown-feature /
+    unsupported-size). Not owned by the store — the store only *uses* the
+    structural check as a load-time sanity gate.
+  - **`DashboardLayoutStore`** — `@MainActor ObservableObject`. Persists a
+    private `{ version: Int, layout: DashboardLayout }` JSON envelope under
+    **`shell.dashboardLayout.v1`** in `UserDefaults`. `init` loads it only if it
+    exists, decodes, `version == schemaVersion` (**1**), *and* passes the
+    structural validator — otherwise the injected **seed**. `replace(with:)` /
+    `resetToDefault()` are the save path (no editing UI calls them in M5.2.0).
+    First run persists nothing, so a future default still takes effect.
+  - **`DashboardSpaceView`** — replaces `DashboardPlaceholderView`. Reads the
+    store, resolves each placement's `featureID` through `FeatureRegistry`, calls
+    `DashFeature.makeComponentView(size:)` (a labelled placeholder for Maps until
+    M5.2.1), absolute-positions each widget on the grid from a `GeometryReader`,
+    and shows simple prev/next + page dots when there is more than one page.
+    Unknown feature / unsupported size / `.full` → a labelled `UnresolvedWidgetView`.
+  - **Default layout** (`DashApp` seeds it with
+    `DashboardLayout.starter(featureID: MapFeature.id)`): **two pages, Maps only**
+    — page 1: `.large` at (0,0) + `.medium` at (0,2) + `.compact` at (3,2);
+    page 2: `.large` at (0,0) + `.medium` at (0,2). Demonstrates multiple sizes,
+    positions, and pages without inventing fake features. Validated clean against
+    the real registry by a test.
+  - **Boundaries held.** `DashboardShell` gains only `@EnvironmentObject
+    layoutStore` + a `DashboardGrid` constant + the `.dashboard(page:)` →
+    `DashboardSpaceView` wiring; it still references no Map view model. The store
+    holds no runtime feature state. `MapFeature` is unchanged (no grid dimensions
+    leak into it).
+  - **Not in M5.2.0:** real Map component rendering, editing / drag / resize,
+    Speedometer, Music, `ThemeManager`, wallpapers, battery/network status. No
+    change to routing / navigation or full-screen Maps.
+  - +24 unit tests (`DashboardLayoutTests` 16, `DashboardLayoutStoreTests` 8).
+    Full suite **347/347**, build clean. **Physically verified on the iPad** —
+    the dashboard page renders the placeholder widgets on the grid and page
+    navigation works.
 
 ### End-to-end
 
@@ -1148,18 +1259,20 @@ not replace their responsibilities.
   iPhone" prompt, and `ConnectedControlView`. Two physical relays being
   disambiguated is also unverified.
 
-### Automated test totals (all passing, 2026-09-02)
+### Automated test totals (all passing, 2026-09-03)
 
 | Suite | Tests | Runner |
 |---|---:|---|
 | `DashSharedTests` | 8 | `swift test` |
 | `DashRelayTests` | 32 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
-| `DashTests` | 293 (per `xcresulttool`; incl. 1 no-op scaffold; +29 M3, +12 M4.1, +20 M4.2, +37 M4.3, +29 M4.4, +27 M4.5, +38 M4.6) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+| `DashTests` | 344 (per `xcresulttool`; incl. 1 no-op scaffold; +29 M3, +12 M4.1, +20 M4.2, +37 M4.3, +29 M4.4, +27 M4.5, +38 M4.6, +23 M5.0, +6 M5.1, +24 M5.2.0) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+| `DashUITests` | 3 (Xcode scaffold: launch + launch-performance) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
 
-Last full run (`xcodebuild test -scheme Dash -only-testing:DashTests`, iOS
-simulator, 2026-09-03, with M4.6 + its 2026-09-03 refinement in the working
-tree): all pass — **293/293** reported by `xcresulttool`, 0 failures; build
-clean (app) with no source warnings.
+Last full run (`xcodebuild test -scheme Dash`, iPad iOS 26.5 simulator,
+2026-09-03, with **M5.2.0 in the working tree**): all pass — **347/347**
+reported by `xcresulttool` (344 `DashTests` + 3 `DashUITests`), 0 failures;
+build clean (app) with no source warnings. (`-only-testing:DashTests` alone:
+**344/344**.)
 
 `DashSharedTests` breakdown: `LocationPacketTests` (4), `RelayAdvertisementTests` (4).
 `DashRelayTests` breakdown: `LocationTrackerTests` (7), `LocationBroadcasterTests`
@@ -1188,6 +1301,17 @@ in `MapContentTests.swift`; `GooglePlaceSuggestionMappingTests` +
 `OffRouteDetectorTests` + `RouteViewModelAutoRerouteTests` +
 `NavigationViewModelOffRouteTests` + `AutomaticRerouteAdoptionTests` (M4.6) in
 `OffRouteTests.swift`.
+`DashTests` (dashboard shell, M5.0–M5.2.0): `ComponentSizeTests` (3);
+`ShellSurfaceTests` + `ShellStoreTests` in `ShellStoreTests.swift`;
+`FeatureRegistryTests` in `FeatureRegistryTests.swift`; `MapFeatureTests`
+(M5.0/M5.1 ownership) in `MapFeatureTests.swift`; `DashboardLayoutModelTests` +
+`DashboardGridTests` + `DashboardLayoutValidatorStructuralTests` +
+`DashboardLayoutValidatorRegistryTests` in `DashboardLayoutTests.swift`;
+`DashboardLayoutStoreTests` + `DashboardSpaceViewTests` in
+`DashboardLayoutStoreTests.swift`. (No SwiftUI-render tests — `DashboardShell` /
+`SidebarView` / widget rendering stay device/visual-validated;
+`DashboardLayout` / `DashboardGrid` / `DashboardLayoutValidator` /
+`ShellStore` are pure and fully unit-covered.)
 (Map / search / routing have no SDK-level tests — `GoogleMapProvider` /
 `GMSMapView` (incl. the M4.1 vehicle-marker drawing and the M4.2 `.navigation`
 camera / gesture wiring), `GooglePlaceSearchService` / `GMSPlacesClient`, and the
@@ -1296,9 +1420,10 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
     open choice; the shared package is wired in as a local SPM reference from the
     one `Dash.xcodeproj` and that has been sufficient so far.
 
-11. **`ContentView` temporarily shows the full-screen map** so the Google Maps
-    integration could be exercised end to end. This is a throwaway shell, not the
-    dashboard layout.
+11. **`ContentView` temporarily showed the full-screen map** so the Google Maps
+    integration could be exercised end to end. *Superseded by the M5 shell* — the
+    full-screen map is now `MapFullScreenView`, opened from `DashboardShell`
+    (§5 items 33–34).
 
 12. **Connection/session as a layer above networking + location.** New
     `ConnectionCoordinator` (iPad) and `RelaySessionController` (iPhone) own the
@@ -1411,11 +1536,12 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
       (was "Disconnect"); it still calls `disconnect()` (deliberate/sticky). The
       first-time list header is "Choose your iPhone…".
     - **Disconnect from Dash while connected** — a new presentational
-      `ConnectedControlView` is overlaid on `ContentView` by `RootView` (the
-      composition point — `ContentView`/map are untouched). It offers
-      **Disconnect** (keeps pairing) and **Forget `<name>`** via a confirmation
-      dialog. Extends §5 decision 17 (both connection views presentational; the
-      container wires them) to the connected state.
+      `ConnectedControlView`. Introduced as a `RootView` overlay on the map;
+      **M5.0 moved it into the shell sidebar** (`DashboardShell` wires its
+      closures to `ConnectionCoordinator`). It offers **Disconnect** (keeps
+      pairing) and **Forget `<name>`** via a confirmation dialog. Extends §5
+      decision 17 (both connection views presentational; the container wires
+      them) to the connected state.
     - **DashRelay stop-while-waiting** — `RelayStatusView`'s `.waiting` state
       gained a **"Stop Sharing"** button (was action-less); it and "Disconnect"
       both call `RelaySessionController.stop()`. So the relay is never forced to
@@ -1808,14 +1934,122 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
       thresholds), auto-reroute, adoption, and the loading-state transition are
       unit-tested (+38); a live drive that misses a turn is pending (§3, §10).
 
+33. **Dashboard shell / feature seam (M5.0 + M5.1).**
+    The CarPlay-style presentation layer is a **standalone layer that owns
+    layout and navigation** and knows nothing about any feature's internals
+    (spec §8). It replaces the old `RootView → ContentView` full-screen-map
+    shell.
+    - **`DashFeature` is the only contract.** A feature exposes a
+      `FeatureManifest` (id, title, symbol, supported `ComponentSize`s, default
+      size), `makeFullScreenView() -> AnyView`, and
+      `makeComponentView(size:) -> AnyView`. Nothing else. `FeatureID` is a
+      stable `String`; **adding a feature is a new `DashFeature` type + one line
+      in `FeatureRegistry.makeDefault()`** — no shell change. Features never
+      reference `Shell/`; the shell never references a Map view model.
+    - **`ShellStore` is pure navigation state.** `ShellSurface` is
+      `home(page)` / `dashboard(page)` / `app(FeatureID)` (`Codable`).
+      `openApp` remembers the current space; `closeApp` returns to it;
+      navigating to a space also leaves an open app. No feature-specific logic,
+      no SDK types.
+    - **`DashboardShell` is the single layout owner.** Persistent `SidebarView`
+      (Home / Dashboard / one button per registered feature) + a content area
+      switching on `ShellSurface`. `ConnectedControlView` (Disconnect / Forget)
+      moved into the sidebar from the old `RootView` overlay — behaviour
+      unchanged. `RootView` shows `DashboardShell` (not the map) while connected;
+      the connection gate + `ConnectionSetupView` are untouched.
+    - **Map runtime state is app-scoped (M5.1).** `MapFeature` — the *only*
+      bridge between `Shell/` and Map code — now owns `MapViewModel` /
+      `DestinationStore` / `PlaceSearchViewModel` / `RouteViewModel` /
+      `NavigationViewModel` for the life of the app (they were `@StateObject`s
+      inside the old `ContentView`). `ContentView` became `MapFullScreenView`,
+      which only *observes* them. So **Maps → Home → Maps no longer resets an
+      active route / navigation session.** The view-model wiring (the
+      `LocationStore` fix pump + the M4.6 off-route → auto-reroute chain) still
+      lives in `MapFullScreenView` and runs while that screen is on-screen —
+      routing / navigation algorithms are unchanged.
+      `makeFullScreenView()` hands back a **cached** `AnyView` so an unrelated
+      shell `body` re-render can't rebuild the map under a live session; leaving
+      Maps entirely still tears the `GMSMapView` down and rebuilds it on return
+      from the persisted state.
+
+34. **Dashboard layout foundation (M5.2.0).**
+    The widget dashboard's arrangement + persistence, with **no** component
+    rendering, editing, drag/resize, or new features yet. Chain:
+    `DashboardShell → DashboardLayoutStore → DashboardLayout → WidgetPlacement →
+    FeatureRegistry → DashFeature.makeComponentView(size:)` (still a placeholder).
+    - **Fixed grid, shell-owned footprints (`DashboardGrid`).** A page is a
+      **6-column × 4-row** cell grid (`DashboardGrid.standard`). A placement
+      stores only `size` + `origin: GridPoint`; the **shell** turns
+      `ComponentSize` into cells — `.compact` 2×1, `.medium` 3×2, `.large` 6×2,
+      `.full` = whole grid (not a valid widget). Grid dimensions never touch
+      `MapFeature`. `GridRect.intersects` + `DashboardGrid.contains` are pure.
+    - **SDK-neutral `Codable` model (`DashboardLayout`).** Ordered
+      `[DashboardPage]`, each ordered `[WidgetPlacement]` =
+      `{ id: UUID, featureID, size, origin }`. Placement identity is part of
+      `Equatable` and survives `Codable` round-trips. `page(at:)` is
+      bounds-checked; `allPlacements` flattens in order.
+    - **Validation is a pure enum namespace (`DashboardLayoutValidator`), not
+      the store's job.** `validate(_:grid:)` — duplicate id / non-widget size /
+      out-of-bounds / per-page overlap. `@MainActor validate(_:grid:registry:)`
+      adds unknown-feature / unsupported-size. The store *uses* the structural
+      check as a load-time gate; it does not contain the rules.
+    - **Persistence: a schema-versioned envelope (`DashboardLayoutStore`).**
+      `@MainActor ObservableObject`. Writes `{ version: Int, layout }` as JSON
+      under **`shell.dashboardLayout.v1`** in `UserDefaults` (the `.vN` in the
+      key is the breaking-change lever; the envelope `version` — currently **1**
+      — guards the current line). `init` returns the persisted layout **only**
+      if it exists, decodes, `version == schemaVersion`, *and* passes the
+      structural validator — otherwise the injected **seed**. `replace(with:)` /
+      `resetToDefault()` are the save path; nothing calls them in M5.2.0 (no
+      editing UI). First run persists nothing, so a later default still applies.
+      No runtime feature state is stored here.
+    - **`DashboardSpaceView` replaces `DashboardPlaceholderView`.** Reads the
+      store, resolves `featureID` through `FeatureRegistry`, calls
+      `DashFeature.makeComponentView(size:)`, absolute-positions each widget on
+      the grid from a `GeometryReader`, and shows prev/next + page dots when
+      `pageCount > 1`. Unknown feature / unsupported size / `.full` →
+      a labelled `UnresolvedWidgetView`. `resolvedPageIndex` clamps the shell's
+      requested page.
+    - **Default layout: two pages, Maps only** (`DashApp` seeds
+      `DashboardLayout.starter(featureID: MapFeature.id)`). Page 1: `.large` at
+      (0,0), `.medium` at (0,2), `.compact` at (3,2). Page 2: `.large` at (0,0),
+      `.medium` at (0,2). Demonstrates multiple sizes / positions / pages
+      without inventing fake features. A test asserts it validates clean against
+      the real registry.
+    - **Boundaries.** `DashboardShell` gains only `@EnvironmentObject
+      layoutStore` + a `DashboardGrid` constant + the `.dashboard(page:)` →
+      `DashboardSpaceView` wiring. `page` navigation is `ShellSurface.dashboard(page:)`
+      + `ShellStore.goToPage` (already there since M5.0). `MapFeature` unchanged.
+    - **Device-verified** on the physical iPad (placeholder widgets render on the
+      grid; page navigation works). Full suite **347/347**, build clean. +24
+      unit tests. §3, §10.
+
 ---
 
 ## 6. Current limitations / known issues
 
-- **No dashboard UI.** Behind the connection gate, `ContentView` is a bare
-  full-screen map. There is no tile layout, no theming, no "GPS signal lost"
-  banner surfaced to the user (the `LocationStore.signal` state exists but
-  nothing displays it).
+- **Dashboard is structural, not visual (M5.0–M5.2.0).** The shell (sidebar +
+  Home + Dashboard spaces), the widget grid, its persistence, and full-screen
+  Maps all work, but: the Home launcher and the dashboard widgets are
+  deliberately plain placeholders; there is still **no theming / `ThemeManager`**,
+  no hidden-iPadOS-chrome pass, no landscape lock, and **no "GPS signal lost"
+  banner** (the `LocationStore.signal` state exists but nothing displays it).
+- **Dashboard widgets are placeholders (until M5.2.1).**
+  `MapFeature.makeComponentView(size:)` returns a labelled placeholder — the
+  compact/medium/large Map presentations are not built. `DashFeature` only has
+  the Map feature registered; Speedometer / Music / Settings don't exist yet.
+- **No dashboard editing.** `DashboardLayoutStore.replace(with:)` /
+  `resetToDefault()` are the only ways to change the layout and nothing calls
+  them — there is no drag / resize / add / remove UI. The default two-page
+  layout is what every run shows. `DashboardLayout` schema is versioned (`v1`)
+  so a later grid or size-semantics change needs migration code, not a silent
+  reset of a user's arrangement.
+- **`DashboardShell` mounts one map view at a time.** Only the visible surface's
+  views are mounted, so leaving Maps dismantles the `GMSMapView` and returning
+  rebuilds it (from the persisted `MapFeature` state — the route / nav session
+  is intact, but there is a brief re-init). A widget-sized live map + the
+  full-screen map are never on screen together in M5.2.0 (widgets are
+  placeholders).
 - **DashRelay UI is minimal.** `RelayStatusScreen` now shows the session state
   (stopped / waiting / connected) with Start and Disconnect actions, but there is
   **no last-sent-timestamp / packet-rate display** (spec §3 asks for "Relay
@@ -1832,10 +2066,9 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
   pairing; to change it the user must Forget and re-pair. `KnownDeviceStore` /
   `KnownRelay` already support updating `displayName` in place — only the UI
   affordance is missing.
-- **`ConnectedControlView` overlays the placeholder `ContentView`.** It is
-  attached in `RootView`, not in `ContentView`/the map, so it moves cleanly when
-  `Home/DashboardView` replaces the shell — but until then it floats over a
-  full-screen map with no designed placement.
+- **`ConnectedControlView` now lives in the shell sidebar** (M5.0 moved it there
+  from the old `RootView` overlay). Disconnect / Forget behaviour is unchanged;
+  the placement is functional, not visually designed.
 - **Pairing works but is single-device in practice.** `KnownDeviceStore` holds a
   list and `ConnectionCoordinator` auto-connects only when *exactly one* known
   relay is visible, but there is **no chooser among several known devices** —
@@ -1886,19 +2119,22 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
   refuses until the cooldown elapses — up to ~25 s to the next attempt. Rare
   (the adopted route normally passes through the current position) and
   conservative by design.
-- **M4.6: `NavigationViewModel` still does not observe `LocationStore`.** The
-  off-route detector, like progress, only advances while `ContentView` pumps
-  fixes into `update(with:)` — fine today (it is the only screen).
+- **M4.6 / M5.1: `NavigationViewModel` still does not observe `LocationStore`.**
+  The off-route detector, like progress, only advances while `MapFullScreenView`
+  pumps fixes into `update(with:)`. Since M5.1 the Map screen is no longer the
+  only screen — leaving Maps (e.g. to Home) **freezes** nav progress / off-route
+  detection until you return (the session *state* is preserved, not advanced).
+  Moving the pump into `MapFeature` (feature observes `LocationStore`) is the
+  natural follow-up; deliberately not done in M5.1.
 - **M4.3: wrong-turn *guidance* still lags until rejoin.** With M4.6 the app now
   recomputes a route when the driver leaves it, but between the missed turn and
   the adopted route the maneuver card can still show the stale maneuver (the
   ~80 m progress-engine off-route-ignore threshold stops a noisy fix from
   *skipping* maneuvers; it does not re-anchor guidance).
 - **M4.3: `NavigationViewModel` does not observe `LocationStore` itself.**
-  `ContentView` pumps each fix into `navVM.update(with:)` and relays
-  `progress` to `MapViewModel` — consistent with `RouteViewModel`, but it means
-  the nav progress only advances while `ContentView` is on screen (fine today —
-  it is the only screen).
+  `MapFullScreenView` pumps each fix into `navVM.update(with:)` and relays
+  `progress` to `MapViewModel` — consistent with `RouteViewModel`. See the
+  M5.1 note above: this now means progress freezes while the Map screen is off.
 - **M4.3: road names are parsed from instruction text.** The Routes API gives no
   dedicated street field per step, so `roadName` comes from an "onto/on/toward"
   heuristic on the instruction string. It handles the common phrasings; unusual
@@ -2003,6 +2239,16 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
   bite when running tests on an older physical device.
 - **`ThemeManager`, `TripStats`, `SettingsStore`** from the spec's intended
   structure do not exist yet.
+- **M5.2.0: `DashboardSpaceView` uses absolute `.offset` positioning**, not a
+  real grid-layout container — fine for fixed placements, but a drag/resize
+  editor will likely want a proper `Layout` or coordinate-space approach.
+- **M5.2.0: the store's load-time validation is grid-only** (no registry, by
+  design). A persisted layout referencing a since-removed feature still loads;
+  the shell renders `UnresolvedWidgetView` for those placements. Registry-aware
+  pruning would couple the store to `FeatureRegistry` — deferred.
+- **M5.2.0: `.compact` (2×1) on a 6-wide grid** leaves a spare column when three
+  are in a row; the size → span table is the one place to tune once real
+  components land (M5.2.1).
 
 ---
 
@@ -2031,9 +2277,14 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
   Forget/settings surface, a friendlier "your paired iPhone changed /
   reinstalled" message, and on-device verification of the *remaining* behaviours
   (§6).
-- **[Planned]** `Home/DashboardView` — the CarPlay-style tile layout that
-  assembles map + music + speedometer (the single layout owner); replaces the
-  `RootView → ContentView` full-screen-map shell.
+- **[Implemented · device-verified]** The CarPlay-style shell — realised as
+  `DashboardShell` + `Shell/` (M5.0), with app-scoped Map state (M5.1) and the
+  widget-grid layout foundation (M5.2.0, §5 items 33–34). The single layout
+  owner; replaced the `RootView → ContentView` full-screen-map shell. **Still
+  [Planned]** on top of it: real Map dashboard components at each `ComponentSize`
+  (M5.2.1), a real multi-page/reorderable Home launcher, dashboard editing
+  (drag/resize/add/remove), a "GPS signal lost" banner, and a designed visual
+  pass.
 - **[Planned]** `ThemeManager` — dark/light auto-switch by local sunrise/sunset.
 - **[Planned]** Hide iPadOS chrome: full-screen, `isIdleTimerDisabled = true`,
   no nav bars / default list styling.
@@ -2093,7 +2344,7 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
   `refresh` field / task with the manual path), `ContentView` off-route →
   auto-reroute → recommended-route adoption + the synchronously-shown
   "Recalculating…" pill. +38 unit tests; a live missed-turn drive is pending
-  (§3, §10). Working tree — not committed.
+  (§3, §10). Committed `73879e7`.
 - **[Planned]** Map layer depth, remaining (the rest of **M4**): a
   **traffic-aware** ETA (`routingPreference: TRAFFIC_AWARE` — a billing change),
   voice guidance, lane guidance. Also: turning a map POI tap
@@ -2127,15 +2378,24 @@ Roughly in order (adapts the spec §11 build order to where we are):
    (`RelayStatusScreen` / `RelayStatusView`). Remaining: a last-sent-timestamp /
    "relay active" indicator (spec §3), and — once the session layer exposes it —
    the connected Dash device's name.
-4. **`DashboardView` skeleton** — placeholder tiles to validate the CarPlay-style
-   layout; move the map into a tile (retire the `RootView → ContentView` shell).
-5. **Speedometer + trip computer** — derived from `LocationStore` (smoothing,
-   km/h, `TripStats`).
-6. **Music** — MusicKit catalog search + custom player.
-7. **`AppleMapProvider` + Settings toggle** — second provider, persisted choice.
+4. **The CarPlay-style shell — done through M5.2.0** (`DashboardShell` + `Shell/`,
+   app-scoped Map state, the widget-grid layout foundation; §5 items 33–34).
+   **Next: M5.2.1** — real Map dashboard components at each `ComponentSize`
+   (`MapFeature.makeComponentView(size:)`): `.large` = interactive `DashMapView`;
+   `.medium` = reduced map + next maneuver + ETA (throttled, tap to open full);
+   `.compact` = maneuver card / favourites dock, no tiny map. After that:
+   a real multi-page/reorderable Home launcher, dashboard editing
+   (drag / resize / add / remove) with the `DashboardLayoutValidator` gating it,
+   the "GPS signal lost" banner, `ThemeManager`, hidden iPadOS chrome,
+   landscape-primary config.
+5. **Speedometer + trip computer** — a `SpeedometerFeature` derived from
+   `LocationStore` (smoothing, km/h, `TripStats`); a good second real feature to
+   prove the registry + sizing.
+6. **Music** — a `MusicFeature` (MusicKit catalog search + custom player).
+7. **`AppleMapProvider` + `SettingsFeature`** — second provider, persisted choice.
 
-Map-feature sub-track (independent of the above ordering; **M1 + M2 + M3 + M4.1 +
-M4.2 + M4.3 + M4.4 + M4.5 committed; M4.6 in the working tree**):
+Map-feature sub-track (independent of the above ordering; **M1–M4.6 committed;
+dashboard shell M5.0 + M5.1 committed; M5.2.0 in the working tree**):
 - **M1 [done]** — widen the rendering boundary for overlays / events / modes
   (§5 item 24).
 - **M2 [done, device-verified for autocomplete]** — `PlaceSearchService` + Google
@@ -2170,17 +2430,34 @@ M4.2 + M4.3 + M4.4 + M4.5 committed; M4.6 in the working tree**):
   + manual `refresh`), `MapViewModel.setRouteOptions` / `selectRouteOption`,
   `MapPolyline.role`, `MapEvent.tappedRoute`, `NavigationViewModel.reroute`,
   `RouteOptionsPanelView`, the maneuver-card Refresh button. §5 item 31.
-- **M4.6 [code done, unit-tested (+38); not committed; 2026-09-03 refinement
-  folded in]** — pure `OffRouteDetector` (onRoute / possiblyOffRoute /
-  confirmedOffRoute, thresholds **20 / 35 / 3**, hysteresis, consecutive-fix
-  confirmation, re-signal), `NavigationViewModel` off-route signal + detector
-  re-arm, `RouteViewModel.autoReroute` (current origin, shared `refresh`
-  field/task, `@Published refreshWasAutomatic` + `isAutomaticallyRecalculating`,
-  25 s cooldown), `ContentView` auto-reroute + recommended-route adoption +
-  synchronously-shown "Recalculating…" pill. §5 item 32.
-  **Detection + auto-reroute only** — no traffic, no polling, no voice.
+- **M4.6 [done, unit-tested (+38), committed `73879e7`; 2026-09-03 refinement
+  folded in; live missed-turn drive still pending]** — pure `OffRouteDetector`
+  (onRoute / possiblyOffRoute / confirmedOffRoute, thresholds **20 / 35 / 3**,
+  hysteresis, consecutive-fix confirmation, re-signal), `NavigationViewModel`
+  off-route signal + detector re-arm, `RouteViewModel.autoReroute` (current
+  origin, shared `refresh` field/task, `@Published refreshWasAutomatic` +
+  `isAutomaticallyRecalculating`, 25 s cooldown), off-route → auto-reroute +
+  recommended-route adoption + synchronously-shown "Recalculating…" pill. §5
+  item 32. **Detection + auto-reroute only** — no traffic, no polling, no voice.
 - **M4.7+** — a **traffic-aware** ETA (`TRAFFIC_AWARE`); then heading smoothing,
   voice guidance, and the POI-tap → destination path.
+
+Dashboard sub-track (§5 items 33–34):
+- **M5.0 [done, committed `258ffde`]** — the shell / feature seam: `DashFeature`
+  / `FeatureManifest` / `FeatureRegistry` / `ComponentSize`, `ShellSurface` /
+  `ShellStore`, `DashboardShell` + `SidebarView` + placeholder Home,
+  `MapFeature` wrapping the full-screen map, `ConnectedControlView` moved to the
+  sidebar. +23 unit tests.
+- **M5.1 [done, committed `e8e913f`]** — Map runtime state moved onto `MapFeature`
+  (app-scoped); `ContentView` → `MapFullScreenView` (observes, doesn't own).
+  A nav session now survives Maps → Home → Maps. +6 unit tests.
+- **M5.2.0 [done, working tree, device-verified]** — the widget-grid layout
+  foundation: `DashboardGrid` (6×4 + footprints), `DashboardLayout` /
+  `WidgetPlacement`, `DashboardLayoutValidator`, `DashboardLayoutStore`
+  (`shell.dashboardLayout.v1`), `DashboardSpaceView` (replaces the placeholder),
+  the two-page Maps starter layout. +24 unit tests. §5 item 34.
+- **M5.2.1 [next]** — real `MapFeature.makeComponentView(size:)` per
+  `ComponentSize`. Then Home / editing / theming / chrome (item 4 above).
 8. **Polish pass** — `ThemeManager`, idle-timer disable, hide iPadOS chrome,
    favourites dock, landscape-primary orientation config.
 
@@ -2298,7 +2575,10 @@ Git history on `main` (newest first):
 
 | Commit | Milestone |
 |---|---|
-| *(working tree, uncommitted)* | **Map "M4.6": smart off-route detection + automatic rerouting** (2026-09-02; **refined 2026-09-03 after a physical drive**) (detection + auto-reroute only — **no** traffic-aware routing, traffic colours, continuous polling, voice guidance, or dashboard work). New pure **`OffRouteDetector`** (`Routing/`, reuses `RouteGeometry.project`): `record(position:on:)` → `onRoute` / `possiblyOffRoute` / `confirmedOffRoute` behind named conservative thresholds — **`onRouteToleranceMeters` 20 / `offRouteThresholdMeters` 35** hysteresis band **/ `confirmationFixCount` 3** *consecutive meaningful* off-route fixes (one or two noisy fixes never trigger) / `resignalAfterFixes` 8 (tightened from 40 / 70 / 4 — the original felt too slow in the car) — signalling **once per episode**; rejoining ends the episode and re-arms. **`NavigationViewModel`** owns the detector (fed from the existing `update(with:)` fix pump), exposes `offRouteStatus` + `needsAutomaticReroute` (+ `clearRerouteRequest()`), and re-arms it on `start` / `reroute` / `stop`. **`RouteViewModel.autoReroute(from:now:)`** runs through the **same `refresh` field + `refreshTask`** as the M4.5 manual Refresh (never concurrent, never doubled), flagged **`@Published refreshWasAutomatic`**; derived **`isRecalculating` / `isAutomaticallyRecalculating`** flip *synchronously* when the request starts (before the API responds) so the "Recalculating…" pill is visible for the whole request and SwiftUI re-renders on the transition. `canAutoReroute(now:)` gates it on a destination + nothing refreshing + `autoRerouteCooldownSeconds` (25, from the last automatic run's *completion*); the manual Refresh ignores the cooldown and cancels an in-flight auto run; a new destination clears the cooldown. **`ContentView`**: after `navVM.update`, `needsAutomaticReroute` → `clearRerouteRequest()` + `autoReroute(from: currentOrigin)`; on `refresh == .options` with `refreshWasAutomatic`, `adoptAutomaticReroute` = `navVM.reroute` + `mapVM.setRouteOptions` + `selectRouteOption(recommended)` + `setNavigationProgress` + `clearRefresh` — recommended route adopted, progress re-seeded, destination / mode / vehicle / follow / guidance / ETA / route-clip untouched, alternatives kept in `mapVM.routeOptions`; on failure nothing is touched. A small non-blocking **"Recalculating…"** pill (snap-in transition) under the maneuver card; a failed auto-reroute → "Couldn't recalculate — keeping current route". **No `RouteService` / `GoogleRouteService` change.** Tests: **`OffRouteTests` (38)** — detector classification / hysteresis / re-signal / re-arm / the refined thresholds / two-fixes-don't-trigger, `autoReroute` (current origin, success/failure, cooldown, no-concurrency w/ manual, manual-wins), the loading-state transition (synchronous, observable, manual≠automatic, failure copy), `NavigationViewModel` off-route signal, adoption sequence. Build clean (app), no source warnings; full `DashTests` green (**293/293** per `xcresulttool`). Not yet device-verified (a live missed-turn drive is pending). §5 item 32. |
+| *(working tree, uncommitted)* | **Dashboard "M5.2.0": widget-grid layout foundation** (2026-09-03) (layout + persistence only — **no** Map component rendering, editing / drag / resize, Speedometer, Music, `ThemeManager`, wallpapers, battery/network status, or navigation changes). New `Shell/Dashboard/`. **`DashboardGrid`** — the fixed **6 × 4** cell grid; the *shell* owns the `ComponentSize` → cell footprint (`.compact` 2×1 / `.medium` 3×2 / `.large` 6×2 / `.full` = whole grid, not a widget); `GridPoint` / `GridSpan` / `GridRect` (half-open rect + `intersects`) + `contains(_:)`, all pure. **`DashboardLayout`** — SDK-neutral `Codable`: ordered `[DashboardPage]` → ordered `[WidgetPlacement]` = `{ id: UUID, featureID, size, origin: GridPoint }`; placement identity is in `Equatable` and round-trips; `page(at:)` bounds-checked; `DashboardLayout.starter(featureID:)` builds the seed. **`DashboardLayoutValidator`** — pure enum namespace, **not** owned by the store: `validate(_:grid:)` (duplicate id / non-widget size / out-of-bounds / per-page overlap) + `@MainActor validate(_:grid:registry:)` (unknown feature / unsupported size); `DashboardLayoutIssue`. **`DashboardLayoutStore`** — `@MainActor ObservableObject`; persists a private `{ version: Int, layout }` JSON envelope under **`shell.dashboardLayout.v1`** in `UserDefaults`; `init` returns the persisted layout only if it exists, decodes, `version == schemaVersion` (**1**), *and* passes the structural validator — else the injected **seed**; `replace(with:)` / `resetToDefault()` are the (unused-in-M5.2.0) save path; first run persists nothing. **`DashboardSpaceView`** replaces `DashboardPlaceholderView`: reads the store, resolves `featureID` via `FeatureRegistry` → `DashFeature.makeComponentView(size:)` (a labelled placeholder for Maps until M5.2.1), absolute-positions each widget on the grid from a `GeometryReader`, prev/next + page dots when `pageCount > 1`; unknown feature / unsupported size / `.full` → `UnresolvedWidgetView`; `resolvedPageIndex` clamps the shell's requested page. **`DashApp`** seeds `DashboardLayoutStore` with `DashboardLayout.starter(featureID: MapFeature.id)` — a **two-page Maps-only** layout (page 1: `.large` (0,0) + `.medium` (0,2) + `.compact` (3,2); page 2: `.large` (0,0) + `.medium` (0,2)) proving multi-size / multi-position / multi-page; a test validates it clean against the real registry. **`DashboardShell`** gains only `@EnvironmentObject layoutStore` + a `DashboardGrid` constant + the `.dashboard(page:)` → `DashboardSpaceView` wiring (page nav is `ShellSurface.dashboard(page:)` + `ShellStore.goToPage`, both since M5.0); it still references no Map view model. `MapFeature` unchanged. Tests: new **`DashboardLayoutTests` (16)** + **`DashboardLayoutStoreTests` (8)** — model / grid / validator (structural + registry-aware), Codable round-trip incl. identity, default seeding, persistence round-trip, corrupt / wrong-version / structurally-invalid → seed fallback, `resetToDefault`, `DashboardSpaceView` page clamp. Build clean (app), no source warnings; full suite **347/347** (`xcodebuild test -scheme Dash`, iPad iOS 26.5 sim). **Device-verified on the physical iPad** — the dashboard page renders the placeholder widgets on the grid and page navigation works. §5 item 34. |
+| `e8e913f` | **Dashboard "M5.1": app-scoped Map runtime state** (2026-09-03) (ownership / lifecycle only — **no** routing / navigation algorithm change, no new features, no Map UX change). The five Map view models (`MapViewModel` / `DestinationStore` / `PlaceSearchViewModel` / `RouteViewModel` / `NavigationViewModel`) moved from `@StateObject`s inside `ContentView` onto **`MapFeature`**, which the `FeatureRegistry` holds for the app's lifetime. `ContentView` → **`MapFullScreenView`** (moved into `Features/Map/`), which now only *observes* those instances (`@ObservedObject` fed from `MapFeature` in `init`); the `.task { searchVM.onDestinationChosen = … }` wiring moved to `MapFeature.init` (`[weak self]`). Result: **Maps → Home → Maps no longer resets an active route / navigation session.** `makeFullScreenView()` returns a **cached** `AnyView(MapFullScreenView)` so an unrelated `DashboardShell` `body` re-render can't rebuild the map under a live session; leaving Maps entirely still tears the `GMSMapView` down and rebuilds it on return from the persisted state. The `LocationStore` fix pump + the M4.6 off-route → auto-reroute chain still live in `MapFullScreenView` and run while it is on screen. Tests: new **`MapFeatureTests` (6)** — manifest; the feature owns its view models for its lifetime; presenting `MapFullScreenView` observes the feature's instances (not new ones); an active navigation session is not recreated by re-presenting Maps; injectable VMs; the search → `DestinationStore` wiring persists. `DashTests` **320/320**, build clean, device-verified. §5 item 33. |
+| `258ffde` | **Dashboard "M5.0": CarPlay-style shell / feature seam** (2026-09-03) (the shell/feature boundary only — no dashboard grid, no customization, no Speedometer / Music / `ThemeManager`, no Map internal refactor, no landscape lock, no battery/network status). New **`Features/`**: `DashFeature` protocol + `FeatureID` (= `String`) + `FeatureManifest` (id / title / symbolName / supportedSizes / defaultSize); **`ComponentSize`** (compact / medium / large / full; `widgetSizes` / `isWidget`); **`FeatureRegistry`** (`@MainActor ObservableObject`; ordered `[any DashFeature]` + `feature(_:)` lookup + `duplicateIDs(in:)` with a `precondition` on init; **`FeatureRegistry.makeDefault()` is the one place the feature set is declared** — `[MapFeature()]`). New **`Shell/`**: `ShellSurface` (`home(page)` / `dashboard(page)` / `app(FeatureID)`, `Codable`); `ShellStore` (`@MainActor`; `surface` / `sidebarCollapsed` / `returnSurface`; `showHome` / `showDashboard` / `goToPage` / `openApp` / `closeApp` / `toggleSidebar` — pure, feature-agnostic; `openApp`→`closeApp` returns to the prior space surface); **`DashboardShell`** (the single layout owner) = persistent **`SidebarView`** (Home / Dashboard / one button per registered feature; **`ConnectedControlView` moved here** from the old `RootView` overlay) + content switching on `ShellSurface`; **`HomePlaceholderView`** (a tile per registered feature + "coming soon" tiles); a `DashboardPlaceholderView`. **`MapFeature`** — the ONLY bridge between `Shell/` and Map code — wraps the existing `ContentView` full-screen. **`RootView`** now shows `DashboardShell` (not the map) when connected; the connection gate + `ConnectionSetupView` are untouched. `DashApp` builds + injects `FeatureRegistry.makeDefault()`. Tests: new **`ComponentSizeTests` (3)** + **`ShellStoreTests`** (`ShellSurface` + `ShellStore` navigation, incl. openApp→closeApp round-trip) + **`FeatureRegistryTests`** (lookup / order / duplicate-id detection / default registry registers Map) + **`MapFeatureTests`** (manifest) — +23 total. `DashTests` **~316**, build clean, device-verified. §5 item 33. |
+| `73879e7` | **Map "M4.6": smart off-route detection + automatic rerouting** (2026-09-02; **refined 2026-09-03 after a physical drive**) (detection + auto-reroute only — **no** traffic-aware routing, traffic colours, continuous polling, voice guidance, or dashboard work). New pure **`OffRouteDetector`** (`Routing/`, reuses `RouteGeometry.project`): `record(position:on:)` → `onRoute` / `possiblyOffRoute` / `confirmedOffRoute` behind named conservative thresholds — **`onRouteToleranceMeters` 20 / `offRouteThresholdMeters` 35** hysteresis band **/ `confirmationFixCount` 3** *consecutive meaningful* off-route fixes (one or two noisy fixes never trigger) / `resignalAfterFixes` 8 (tightened from 40 / 70 / 4 — the original felt too slow in the car) — signalling **once per episode**; rejoining ends the episode and re-arms. **`NavigationViewModel`** owns the detector (fed from the existing `update(with:)` fix pump), exposes `offRouteStatus` + `needsAutomaticReroute` (+ `clearRerouteRequest()`), and re-arms it on `start` / `reroute` / `stop`. **`RouteViewModel.autoReroute(from:now:)`** runs through the **same `refresh` field + `refreshTask`** as the M4.5 manual Refresh (never concurrent, never doubled), flagged **`@Published refreshWasAutomatic`**; derived **`isRecalculating` / `isAutomaticallyRecalculating`** flip *synchronously* when the request starts (before the API responds) so the "Recalculating…" pill is visible for the whole request and SwiftUI re-renders on the transition. `canAutoReroute(now:)` gates it on a destination + nothing refreshing + `autoRerouteCooldownSeconds` (25, from the last automatic run's *completion*); the manual Refresh ignores the cooldown and cancels an in-flight auto run; a new destination clears the cooldown. **`ContentView`**: after `navVM.update`, `needsAutomaticReroute` → `clearRerouteRequest()` + `autoReroute(from: currentOrigin)`; on `refresh == .options` with `refreshWasAutomatic`, `adoptAutomaticReroute` = `navVM.reroute` + `mapVM.setRouteOptions` + `selectRouteOption(recommended)` + `setNavigationProgress` + `clearRefresh` — recommended route adopted, progress re-seeded, destination / mode / vehicle / follow / guidance / ETA / route-clip untouched, alternatives kept in `mapVM.routeOptions`; on failure nothing is touched. A small non-blocking **"Recalculating…"** pill (snap-in transition) under the maneuver card; a failed auto-reroute → "Couldn't recalculate — keeping current route". **No `RouteService` / `GoogleRouteService` change.** Tests: **`OffRouteTests` (38)** — detector classification / hysteresis / re-signal / re-arm / the refined thresholds / two-fixes-don't-trigger, `autoReroute` (current origin, success/failure, cooldown, no-concurrency w/ manual, manual-wins), the loading-state transition (synchronous, observable, manual≠automatic, failure copy), `NavigationViewModel` off-route signal, adoption sequence. Build clean (app), no source warnings; full `DashTests` green (**293/293** per `xcresulttool`). Not yet device-verified (a live missed-turn drive is pending). §5 item 32. |
 | `678e478` | **Map "M4.5": multiple route options + manual route refresh** (selection + refresh only — **no** traffic-aware routing, traffic-coloured polylines, polling, off-route detection, automatic rerouting, voice, or dashboard work). **`RouteService.routes(from:to:) → [Route]`** — `GoogleRouteService` adds `computeAlternativeRoutes: true` (still `TRAFFIC_UNAWARE`), `parseRoutes` maps every route in response order keyed `"route-<index>"`, dropping unusable ones; Google DTOs stay in-file; `Route` gains a stable `id`. New SDK-neutral **`RouteOptions`** (routes + `selectedID` + `summaries` with a "Recommended / N min faster / N min longer / Similar time" label). `RouteViewModel.state` carries `loaded(RouteOptions)`; a **separate `refresh` field** (`none` / `recalculating` / `options` / `noCurrentLocation` / `failed`) drives a manual **Refresh Route** from the *current* location + remembered destination without disturbing the active route. **`MapViewModel` owns selection + rendering**: `setRouteOptions` / `selectRouteOption` pick the active `route`; `rebuildRoutePolylines` draws the selected route `.selected` (clipped while navigating) + the rest `.alternative` with stable ids (no stale line); preview select re-fits the camera and **does not start navigation**; nav-refresh adopt swaps the route + resets `navigationProgress` + keeps the vehicle indicator + doesn't restart the session + only moves the camera if follow is on. **`MapEvent.tappedRoute(id:)`** picks an alternative from the map (preview only). **`NavigationViewModel.reroute(to:from:)`** re-seeds progress mid-drive. `MapPolyline` gains `role`; `GoogleMapProvider.syncPolylines` styles by role (`.selected` thick blue z2 / `.alternative` thin grey z1), makes lines tappable, and emits `.tappedRoute`. **`RouteOptionsPanelView`** — a compact chip row (preview selector + nav-refresh selector). No automatic switching on time savings. Tests: new **`RouteOptionsTests` (8)** + `RouteTests` / `NavigationTests` M4.5 cases (+27 total). Build clean (app + device), no warnings; full `DashTests` green (258). Physically verified on the iPad. §5 item 31. |
 | `4697557` | **Map "M4.4": route info & ETA** (display only — **no** new route data, traffic-aware routing, rerouting, off-route detection, alternatives, voice, or dashboard work). A bottom **`RouteInfoPanelView`** shows distance · travel time · arrival time: over the route preview it's the whole-route figures with ETA = now + `Route.duration`; during navigation it swaps to remaining distance (from `NavigationProgress`) · remaining time (**new `NavigationProgress.remainingDuration(along:)` — `route.duration` × distance-fraction-left, no traffic model**) · ETA = now + that. Formatting is pure + SDK-neutral: **`RouteFormat`** (`distance` / `duration`) + **`Duration.inSeconds`** in `Routing/`; the ETA clock string uses **`Date.FormatStyle` with the viewer's locale + time zone** (both injectable for tests — no hardcoded format). **`RouteInfo`** (`.preview(route:)` / `.remaining(route:progress:)`, `Kind` carrying distinct labels) builds the model from the existing `Route` + `NavigationProgress` — no duplicate route maths. **`NavigationViewModel.routeInfo(now:)`** exposes the live info (`nil` inactive / arrived). `ContentView` shows the panel in a bottom `TimelineView(.periodic(by: 30))` (so a stationary preview ETA still ticks; nav also refreshes per fix), above the Start button; the preview panel is plain material ("Distance / Time / Arrival"), the live one blue-accented ("Remaining / Time left / ETA"). Maneuver card / Start button / camera **untouched**. Tests: new **`RouteInfoTests` (17)**. Build clean (app + device), no warnings. **Device-verified** (preview panel, swap to live panel on Start, figures updating with movement). **Polish pass (same working tree):** (1) `MapCameraPlan.navigation` gains `vehicleVerticalAnchor` — the vehicle sits *slightly below* centre (was pushed above; `GoogleMapProvider` turns the anchor into top viewport padding); (2) during navigation the drawn route line is clipped to the road still ahead (`RouteGeometry.remainingPolyline` off `route.polyline` + the M4.3 projection — `Route` never mutated), full route in preview / cruising, cleared on arrival / End; (3) in preview the info panel + Start button share one bottom row (panel flexible/larger, button hugging right). Start / maneuver-card / follow-recenter / user-pan behaviour and `RouteInfo` content unchanged. Tests: +12 (`NavigationTests` `remainingPolyline` + `RemainingRouteRenderTests` + camera-anchor). Full `DashTests` green (231). Installed on the iPad; polish visual check pending. §5 item 30. |
 | `a262a9c` | **Map "M4.3": start navigation & maneuver guidance** (guidance display + camera only — **no** off-route detection, rerouting, alternative routes, traffic switching, voice, lane guidance, ETA, or dashboard work). `Route` gained **`steps: [RouteStep]`** (SDK-neutral `ManeuverType` + instruction + road name + point + step polyline + distance; defaults `[]`). `GoogleRouteService`: field mask adds `routes.legs.steps.*`, private DTOs + the Google `Maneuver` → `ManeuverType` table + an "onto/on/toward" road-name heuristic all stay in-file (step fields = Routes **Advanced** SKU, still free-tier once-per-trip). New pure engine in `Routing/`: **`RouteGeometry`** (haversine / polyline length / point→polyline projection) and **`NavigationProgressCalculator`** — progress is one monotone `traveledMeters` scalar; a fix advances the displayed maneuver **by ≤ 1** and a fix > ~80 m off every step is ignored, so noise never skips a turn. **`NavigationViewModel`** (`@MainActor`, mirrors `RouteViewModel`; `inactive` / `navigating(NavigationProgress)` / `arrived`) builds a **`ManeuverCard`**. **`ManeuverCardView`** (top-of-map, CarPlay-style: arrow + big distance + instruction/road + End) and **`StartNavigationButton`** are presentational; `ContentView` swaps the search + route-status overlay for the card while navigating and wires the fix pump → `navVM.update` → `mapVM.setNavigationProgress`. **`MapViewModel.startNavigation()`** (gated on route + a fix + preview mode) enters `.navigating`; the follow camera keeps M4.2's tilt/below-centre framing and overrides the zoom via pure **`navigationZoom(...)`** — base until ~350 m from a `warrantsCloserView` maneuver, ramping to `+1.5` by ~40 m, **quantised to 0.5 steps**, easing back after; follow-off freezes it; recenter restores nav follow. **No `GoogleMapProvider` change.** Tests: new **`NavigationTests` (+~33)** + `RouteTests` (+4). Build clean (app + device), no warnings; full `DashTests` green (202 / 202). **Physically verified on the iPad** — Start Navigation, maneuver card + live updates, route progress, navigation follow / recenter, dynamic maneuver zoom all work. §5 item 29. |
@@ -2444,4 +2724,20 @@ Git history on `main` (newest first):
   thresholds tightened to 20 / 35 / 3. **Still not driven:** the tightened
   thresholds on a real missed turn; the pill on a real screen; a live
   `computeRoutes` reroute mid-drive; the recommended-route swap while following.
-  Working tree — not committed.
+  Committed `73879e7`.
+- **Dashboard M5.0 + M5.1 — device-verified; committed `258ffde` / `e8e913f`.**
+  On the physical iPad: the CarPlay-style shell shows the sidebar (Home /
+  Dashboard / Maps), Home lists the Maps tile + "coming soon" tiles, tapping
+  Maps opens the full-screen map, and returning to Home then back to Maps keeps
+  an active route / navigation session (M5.1's app-scoped state). Disconnect /
+  Forget still work from the sidebar. +29 unit tests across `ComponentSizeTests`
+  / `ShellStoreTests` / `FeatureRegistryTests` / `MapFeatureTests` cover the pure
+  navigation state + the feature-ownership guarantees.
+- **Dashboard M5.2.0 — the widget grid — device-verified.** On the physical
+  iPad the Dashboard space renders the two-page starter layout: the placeholder
+  Map widgets appear at their grid positions/sizes and the prev/next page
+  controls switch pages. The layout model / grid math / validator /
+  persistence (`shell.dashboardLayout.v1`, schema-version + corrupt-data
+  fallback) are covered by +24 unit tests
+  (`DashboardLayoutTests` / `DashboardLayoutStoreTests`). Full suite **347/347**,
+  build clean. Working tree — not committed.
