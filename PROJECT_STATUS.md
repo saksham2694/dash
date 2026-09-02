@@ -2761,3 +2761,19 @@ Future requirement:
 - Tapping a dashboard widget should open its corresponding feature in full-screen app mode.
 
 Next: M5.3.0 — dashboard widget tap → full-screen feature navigation.
+
+## M5.3.0 — Dashboard Widget Tap → Full-Screen Feature
+
+Status: Implemented.
+
+- Each dashboard widget is now a full-tile button; tapping it opens that widget's feature full-screen.
+- `WidgetHostView` forwards only `WidgetPlacement.featureID` through a new `onOpenFeature: (FeatureID) -> Void` callback; `DashboardShell` wires it to `ShellStore.openApp` (mirroring the Home launcher).
+- The dashboard layer stays feature-agnostic: `DashboardSpaceView` / `WidgetHostView` know only `WidgetPlacement`, `FeatureRegistry`, `DashFeature`, and the callback — never `ShellStore` or any feature view model.
+- Close returns to the exact Home / Dashboard page the widget was opened from (existing `ShellStore.openApp`/`closeApp`/`returnSurface` semantics, unchanged).
+- Full-screen path is unchanged: `FeatureRegistry.feature(id).makeFullScreenView()`, same as opening from the sidebar/Home; no Maps special-casing; app-scoped `MapFeature` state (M5.1) reused.
+- Live Map widget stays non-interactive to map gestures (`GMSMapView` keeps `allowsHitTesting(false)`); the tile button handles the tap, no nested-gesture conflict. Minimal press-dim feedback, no elaborate animation.
+- `MapFeature` / `MapFullScreenView` internals untouched.
+- DashTests: 367/367 passed. Build: succeeded with no new warnings.
+- No commit was made by Claude.
+
+Next: M5.4.0 — Speedometer feature (a second real `DashFeature`; sidebar + Home + dashboard widget presentations).

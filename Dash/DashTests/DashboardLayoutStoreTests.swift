@@ -118,7 +118,7 @@ struct DashboardSpaceViewTests {
         func view(_ page: Int) -> DashboardSpaceView {
             DashboardSpaceView(
                 layoutStore: store, registry: registry, grid: .standard,
-                requestedPage: page, onSelectPage: { _ in }
+                requestedPage: page, onSelectPage: { _ in }, onOpenFeature: { _ in }
             )
         }
 

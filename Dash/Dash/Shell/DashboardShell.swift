@@ -9,12 +9,13 @@
 //  Shown by `RootView` whenever Dash is connected, in place of the old
 //  full-screen map view.
 //
-//  Scope so far: the shell/feature seam + the widget dashboard grid (M5.2.0).
-//  The Home launcher is still a simple placeholder. The Dashboard space
-//  (`DashboardSpaceView`) renders the persisted `DashboardLayout`; feature
-//  components are still placeholders until M5.2.1. The only feature that opens
-//  full-screen is Map — via `MapFeature.makeFullScreenView()`, whose runtime
-//  state is app-scoped (M5.1).
+//  Scope so far: the shell/feature seam, the widget dashboard grid, real Map
+//  dashboard components (M5.2.x), and — M5.3.0 — tapping a widget opens its
+//  feature full-screen via `ShellStore.openApp` (wired through
+//  `DashboardSpaceView.onOpenFeature`, mirroring the Home launcher's `onOpen`).
+//  `closeApp()` returns to the exact Home / Dashboard page it was opened from.
+//  Feature runtime state stays app-scoped (M5.1). The Home launcher is still a
+//  simple placeholder.
 //
 
 import SwiftUI
@@ -67,7 +68,8 @@ struct DashboardShell: View {
                 registry: registry,
                 grid: grid,
                 requestedPage: pageIndex,
-                onSelectPage: { shell.goToPage($0) }
+                onSelectPage: { shell.goToPage($0) },
+                onOpenFeature: { shell.openApp($0) }
             )
         case .app(let id):
             if let feature = registry.feature(id) {
