@@ -42,7 +42,7 @@ private func tinyUserGesture(around lat: Double, _ lon: Double, zoom: Double = 1
 private func navPlan(_ camera: MapCameraState) -> MapCameraPlan {
     .navigation(camera,
                 pitchDegrees: MapViewModel.navigationPitchDegrees,
-                focusBelowCentre: MapViewModel.navigationFocusBelowCentre)
+                vehicleVerticalAnchor: MapViewModel.navigationVehicleAnchor)
 }
 
 // MARK: - Cruising follow
@@ -250,11 +250,12 @@ struct NavigatingCameraTests {
         #expect(vm.content.camera == navPlan(vm.camera))
     }
 
-    @Test("the navigation plan pushes the vehicle below centre and tilts the camera")
+    @Test("the navigation plan tilts the camera and anchors the vehicle a little below centre")
     func navigationPlanShape() {
         #expect(MapViewModel.navigationPitchDegrees > 0)
-        #expect(MapViewModel.navigationFocusBelowCentre > 0)
-        #expect(MapViewModel.navigationFocusBelowCentre < 1)
+        // Below centre (> 0.5) but not pushed hard down / up.
+        #expect(MapViewModel.navigationVehicleAnchor > 0.5)
+        #expect(MapViewModel.navigationVehicleAnchor < 0.7)
     }
 }
 

@@ -118,4 +118,28 @@ nonisolated enum RouteGeometry {
         }
         return best
     }
+
+    /// The part of `polyline` still ahead of `position`, in travel order: the
+    /// projected point followed by every later vertex (M4.4 polish — draws only
+    /// the remaining route during navigation). Returns the whole polyline when
+    /// `position` can't be projected, and `[]` once `position` is at or past the
+    /// end (nothing left to draw).
+    static func remainingPolyline(
+        of polyline: [MapCoordinate],
+        from position: MapCoordinate
+    ) -> [MapCoordinate] {
+        guard polyline.count >= 2, let projection = project(position, onto: polyline) else {
+            return polyline
+        }
+
+        var remaining: [MapCoordinate] = [projection.point]
+        remaining.append(contentsOf: polyline[(projection.segmentIndex + 1)...])
+
+        // Drop a leading point that coincides with the projection (vehicle
+        // sitting on, or just past, a vertex).
+        if remaining.count >= 2, distance(remaining[0], remaining[1]) < 1 {
+            remaining.removeFirst()
+        }
+        return remaining.count >= 2 ? remaining : []
+    }
 }

@@ -40,19 +40,20 @@ struct ContentView: View {
         mapViewModel.mode == .navigating
     }
 
+    /// The route currently loaded for the chosen destination, if any.
+    private var loadedRoute: Route? {
+        if case .loaded(let route) = routeViewModel.state { return route }
+        return nil
+    }
+
     var body: some View {
         DashMapView(viewModel: mapViewModel, location: locationStore.latestPacket)
             .ignoresSafeArea()
             .overlay(alignment: .top) { topOverlay }
-            .overlay(alignment: .bottom) {
-                if mapViewModel.canStartNavigation {
-                    StartNavigationButton { startNavigation() }
-                        .padding(.bottom, 28)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
+            .overlay(alignment: .bottom) { bottomOverlay }
             .animation(.easeInOut(duration: 0.2), value: mapViewModel.canStartNavigation)
             .animation(.easeInOut(duration: 0.2), value: isNavigating)
+            .animation(.easeInOut(duration: 0.2), value: loadedRoute)
             .task {
                 searchViewModel.onDestinationChosen = { destinationStore.select($0) }
             }
@@ -79,6 +80,38 @@ struct ContentView: View {
             .onChange(of: navigationViewModel.state) { _, _ in
                 mapViewModel.setNavigationProgress(navigationViewModel.progress)
             }
+    }
+
+    /// The route-info panel(s) and the Start Navigation button. `TimelineView`
+    /// keeps the ETA current without a hand-rolled timer; during navigation the
+    /// panel also refreshes on each GPS fix (`navigationViewModel.state` changes).
+    ///
+    /// In destination preview the info panel and the Start button share one
+    /// bottom row (panel flexible + larger, button hugging its content on the
+    /// right); during navigation the live panel is on its own, full width.
+    private var bottomOverlay: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            VStack(spacing: 12) {
+                if mapViewModel.mode == .destinationPreview, let route = loadedRoute {
+                    HStack(spacing: 12) {
+                        RouteInfoPanelView(info: .preview(route: route, now: context.date))
+                            .frame(maxWidth: .infinity)
+                        if mapViewModel.canStartNavigation {
+                            StartNavigationButton { startNavigation() }
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                if let info = navigationViewModel.routeInfo(now: context.date) {
+                    RouteInfoPanelView(info: info)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .frame(maxWidth: 620)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 28)
+        }
     }
 
     @ViewBuilder

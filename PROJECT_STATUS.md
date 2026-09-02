@@ -6,31 +6,39 @@ without conversation history.
 
 - **Last updated:** 2026-09-02
 - **Branch:** `main`
-- **Latest commit:** `d8b291e feat(map): add camera follow controls` — Map
-  **M4.2** (§5 item 28), physically verified on device (cruising follow, any-size
-  pan/zoom drops follow, recenter restores).
-- **Everything through M4.2 is committed.** Connection/pairing/relay-status →
+- **Latest commit:** `a262a9c feat(map): add navigation guidance` — Map **M4.3**
+  (§5 item 29), physically verified on device (Start Navigation, maneuver card +
+  live updates, route progress, navigation follow/recenter, dynamic maneuver
+  zoom).
+- **Everything through M4.3 is committed.** Connection/pairing/relay-status →
   `9a02364` / `ec4d4a9` / `c3a3a18`; Map **M1** + **M2** → `973ffc9`; **M3** →
   `28b5be5` (Routes API device-verified; carries the `X-Ios-Bundle-Identifier`
-  header); **M4.1** → `8255749`; **M4.2** → `d8b291e`. See §10 for the mapping.
-- **Working tree (not yet committed):** **Map "M4.3" — start navigation &
-  maneuver guidance.** `MapViewModel.startNavigation()` moves from
-  `.destinationPreview` into `.navigating` (gated on a loaded route + a current
-  fix), keeping the M3 route. `Route` gained `steps: [RouteStep]` (SDK-neutral
-  maneuvers — type / instruction / road name / point / geometry);
-  `GoogleRouteService` requests + maps the Routes API `legs[].steps[]`, Google
-  maneuver vocabulary staying inside that file. A pure provider-neutral engine
-  (`NavigationProgressCalculator` / `NavigationViewModel`) turns the
-  `LocationStore` position + active route into the upcoming maneuver, distance to
-  it, and remaining distance — advancing by at most one maneuver per fix and
-  ignoring off-route noise. A CarPlay-style `ManeuverCardView` (arrow + distance
-  + instruction/road) sits at the top of the map; the `.navigating` camera keeps
-  the M4.2 tilt/below-centre framing and now **zooms in approaching a significant
-  turn, easing back to base afterwards** (quantised, in `MapViewModel`).
-  **Physically verified on the iPad** (Start Navigation, maneuver guidance, route
-  progress, follow/recenter, dynamic maneuver zoom). No rerouting / off-route
-  detection / alternative routes / voice / lane guidance / dashboard. See §5 item
-  29, §10.
+  header); **M4.1** → `8255749`; **M4.2** → `d8b291e`; **M4.3** → `a262a9c`. See
+  §10 for the mapping.
+- **Working tree (not yet committed):** **Map "M4.4" — route info & ETA.** A
+  bottom **route-info panel** (`RouteInfoPanelView`) shows distance / travel time
+  / arrival time: over the route preview it's the whole-route figures with
+  ETA = now + `Route.duration`; during navigation it switches to remaining
+  distance (from `NavigationProgress`) / remaining travel time (the route's
+  duration scaled by the fraction of distance left — no traffic model) / ETA =
+  now + that. All formatting is pure and SDK-neutral (`RouteFormat` for
+  distance / duration, `Date.FormatStyle` with the viewer's locale + time zone
+  for the clock; `RouteInfo` builds the display model from the existing `Route`
+  + `NavigationProgress` — no duplicate route maths). The preview panel and the
+  live panel are visually + label-distinct ("Distance / Time / Arrival" vs
+  "Remaining / Time left / ETA", the live one blue-accented). No rerouting /
+  off-route detection / alternatives / traffic / voice / dashboard.
+  **M4.4 polish pass (also working tree):** (1) the navigation camera now anchors
+  the vehicle *slightly below* centre (`MapCameraPlan.navigation` carries a
+  `vehicleVerticalAnchor`; `GoogleMapProvider` turns it into viewport padding) —
+  it was pushed too high; (2) during navigation the drawn route line is clipped
+  to just the part still ahead of the vehicle
+  (`RouteGeometry.remainingPolyline` off `route.polyline` + the M4.3 projection;
+  the `Route` model is never mutated), full route in preview / cruising,
+  cleared on arrival; (3) in destination preview the info panel and the Start
+  button now share one bottom row (panel flexible + larger, button hugging its
+  content on the right). Start Navigation / maneuver-card / follow-recenter /
+  user-pan behaviour and `RouteInfo` content are unchanged. See §5 item 30, §10.
 - **Authoritative requirements:** `PROJECT_SPEC.pdf` (repo root) — "iPad CarPlay-style Dashboard — Project Spec"
 - **Day-to-day guidance:** `CLAUDE.md` (repo root)
 
@@ -119,13 +127,13 @@ dash/
     │   └── Features/Map/                       # all SDK-neutral except GoogleMapProvider.swift
     │       ├── MapProvider.swift               # rendering-only protocol (MapContent in, MapEvent out) + MapProviderID
     │       ├── MapGeometry.swift               # MapCoordinate + MapCoordinateBounds (tightest-box math)
-    │       ├── MapCameraState.swift            # camera value type + following(_:); MapCameraPlan (.follow / .fit / .navigation)
+    │       ├── MapCameraState.swift            # camera value type + following(_:); MapCameraPlan (.follow / .fit / .navigation(pitch, vehicleVerticalAnchor))
     │       ├── MapContent.swift                # the render state: camera plan, vehicle indicator, polylines, markers
     │       ├── VehicleIndicator.swift          # M4.1 — SDK-neutral current-location: coordinate + optional heading (from LocationPacket)
     │       ├── MapOverlay.swift                # MapPolyline + MapMarker (identified, diffable overlay descriptors)
     │       ├── MapEvent.swift                  # taps (map / POI / marker) + camera-idle (byUserGesture, M4.2-filtered); MapPOI, MapCameraPosition
     │       ├── MapMode.swift                   # cruising / destinationPreview / navigating (all realised; startNavigation() enters navigating, M4.3)
-    │       ├── MapViewModel.swift              # holds provider + mode + destination + route + followsVehicle + navigationProgress; startNavigation(); dynamic nav zoom; derives MapContent; routes MapEvent
+    │       ├── MapViewModel.swift              # holds provider + mode + destination + route + followsVehicle + navigationProgress; startNavigation(); dynamic nav zoom; clips route to the road ahead while navigating (M4.4); derives MapContent
     │       ├── DashMapView.swift               # neutral SwiftUI component; overlays the RecenterButton (M4.2)
     │       ├── RecenterButton.swift            # M4.2 — small "resume follow" affordance (presentational; NOT in GoogleMapProvider)
     │       ├── GoogleMapProvider.swift         # ONLY Map file importing GoogleMaps; wraps GMSMapView, diffs overlays + vehicle + camera, UserGestureLatch (willMove-based)
@@ -136,20 +144,23 @@ dash/
     │       │   ├── DestinationStore.swift      # @MainActor ObservableObject — the chosen Destination? (source of truth)
     │       │   ├── PlaceSearchViewModel.swift  # SDK-free: debounce, suggestions, resolve-to-Destination via onDestinationChosen
     │       │   └── MapSearchView.swift         # custom search field + suggestions list + selected-destination chip (presentational)
-    │       ├── Routing/                        # M3 + M4.3 — driving route + turn-by-turn (NO SDK anywhere; GoogleRouteService is REST-only)
+    │       ├── Routing/                        # M3 + M4.3 + M4.4 — driving route, turn-by-turn, ETA (NO SDK anywhere; GoogleRouteService is REST-only)
     │       │   ├── Route.swift                 # SDK-neutral: polyline + distanceMeters + Duration + steps [RouteStep] (M4.3)
     │       │   ├── RouteStep.swift             # M4.3 — SDK-neutral maneuver: ManeuverType + instruction + roadName + maneuverPoint + polyline + distance
     │       │   ├── RouteService.swift          # provider-neutral protocol (route(from:to:)) + RouteError
     │       │   ├── GoogleRouteService.swift    # Google Routes API over URLSession; Foundation only; maps legs[].steps[] + Google maneuver vocab (M4.3)
     │       │   ├── GooglePolyline.swift        # pure encoded-polyline decoder
-    │       │   ├── RouteGeometry.swift         # M4.3 — pure geodesic: haversine distance, polyline length, project point → polyline
-    │       │   ├── RouteProgress.swift         # M4.3 — pure engine: NavigationProgress + NavigationProgressCalculator (upcoming maneuver, distances, noise handling)
+    │       │   ├── RouteGeometry.swift         # M4.3 — pure geodesic: haversine, polyline length, project point → polyline; + M4.4 remainingPolyline(of:from:)
+    │       │   ├── RouteProgress.swift         # M4.3 — pure engine: NavigationProgress + NavigationProgressCalculator; + M4.4 remainingDuration(along:)
+    │       │   ├── RouteFormatting.swift       # M4.4 — pure RouteFormat (distance / duration / locale-aware clock) + Duration.inSeconds
     │       │   ├── RouteViewModel.swift        # SDK-free: idle / loading / loaded / noCurrentLocation / failed
     │       │   └── RouteStatusView.swift       # small transient loading/error pill (presentational)
-    │       └── Navigation/                     # M4.3 — active turn-by-turn session (SDK-neutral)
-    │           ├── NavigationViewModel.swift   # @MainActor: start/stop/update, state = inactive/navigating(progress)/arrived, builds ManeuverCard
+    │       └── Navigation/                     # M4.3 + M4.4 — active turn-by-turn session + info panel (SDK-neutral)
+    │           ├── NavigationViewModel.swift   # @MainActor: start/stop/update, state = inactive/navigating(progress)/arrived, builds ManeuverCard; routeInfo(now:) (M4.4)
     │           ├── ManeuverCard.swift          # presentational model + NavigationDistance formatting
     │           ├── ManeuverCardView.swift      # top-of-map CarPlay-style maneuver card (arrow + distance + instruction/road + End) (presentational)
+    │           ├── RouteInfo.swift             # M4.4 — SDK-neutral display model: preview(route:) / remaining(route:progress:) → distance/duration/ETA text + Kind labels
+    │           ├── RouteInfoPanelView.swift    # M4.4 — bottom 3-stat panel (distance · time · ETA); preview vs live look (presentational)
     │           └── StartNavigationButton.swift # "Start Navigation" action over the route preview (presentational)
     │   # (spec-planned but NOT present: Models/, Features/Music, Features/Speedometer,
     │   #  Features/Settings, Home/DashboardView, Core/ThemeManager)
@@ -167,7 +178,8 @@ dash/
     │   ├── RouteTests.swift                   # M3 + M4.3: Route model, polyline decode, Routes request/response mapping (incl. step/maneuver parsing), RouteViewModel, MapViewModel.setRoute
     │   ├── VehicleIndicatorTests.swift        # M4.1: LocationPacket → VehicleIndicator (heading validation); GoogleMapProvider.vehicleStyle dot/pointer
     │   ├── CameraFollowTests.swift            # M4.2: follow on/off, any user gesture disables (incl. tiny), recenter, navigation plan, UserGestureLatch
-    │   ├── NavigationTests.swift              # M4.3: RouteGeometry, progress engine (advance / noise / arrival), NavigationViewModel, ManeuverCard, dynamic nav zoom
+    │   ├── NavigationTests.swift              # M4.3: RouteGeometry, progress engine, NavigationViewModel, ManeuverCard, nav camera/zoom; + M4.4 remainingPolyline + route-clip rendering + camera anchor
+    │   ├── RouteInfoTests.swift               # M4.4: RouteFormat (distance/duration/clock), Duration.inSeconds, remainingDuration, RouteInfo preview/remaining, NavigationViewModel.routeInfo
     │   └── DashTests.swift          # scaffold `example()` — no-op, still present
     ├── DashUITests/                 # Xcode scaffold only, no real tests
     └── DashRelay/                   # iPhone app target
@@ -557,9 +569,10 @@ not replace their responsibilities.
   - `MapCameraState` — value type (lat/lon/`headingDegrees?`/zoom + `.default` +
     `following(_:)` + `center`). `MapCameraPlan` — `.follow(MapCameraState)` /
     `.fit(MapCoordinateBounds, padding:)` (route preview) /
-    `.navigation(MapCameraState, pitchDegrees:, focusBelowCentre:)` (M4.2 — a
-    tilted, vehicle-below-centre framing; the provider turns it into its own
-    camera + viewport padding).
+    `.navigation(MapCameraState, pitchDegrees:, vehicleVerticalAnchor:)` (M4.2,
+    tuned M4.4 — a tilted framing that puts the vehicle at `anchor` of the
+    viewport height from the top, `> 0.5` = slightly below centre; the provider
+    turns the anchor into its own viewport padding).
   - `MapContent` — the full render state: `camera: MapCameraPlan`,
     `vehicle: VehicleIndicator` (M4.1 — was a bare `MapCoordinate`),
     `polylines: [MapPolyline]`, `markers: [MapMarker]`. `Equatable` for provider-side diffing.
@@ -600,6 +613,13 @@ not replace their responsibilities.
     `base + 1.5` by ~40 m, quantised to 0.5 steps; eases back to base once past
     the turn. When `followsVehicle` is off, progress updates never move or zoom
     the camera.
+    **M4.4:** the `.navigating` plan carries `vehicleVerticalAnchor = 0.6` (the
+    vehicle sits slightly below centre — it was previously pushed above centre).
+    `update(with:)` / `setMode` / `setRoute` / `setDestination` call a private
+    `refreshRoutePolyline()` — while `.navigating` it sets `content.polylines` to
+    `RouteGeometry.remainingPolyline(of: route.polyline, from: vehicle)` (the
+    road still ahead), otherwise the full `route.polyline`, and `[]` on arrival /
+    no route. `route` itself is never mutated.
   - `DashMapView` — neutral component; feeds `location` in, forwards `MapEvent`s,
     and overlays `RecenterButton` (bottom-trailing) when `showsRecenterButton`.
   - `RecenterButton` (M4.2) — a small presentational circular button; `DashMapView`
@@ -635,9 +655,14 @@ not replace their responsibilities.
     coordinate → `searchVM.origin` / routing origin / `navVM.update(with:)` →
     `mapVM.setNavigationProgress`, and the Start Navigation tap →
     `mapVM.startNavigation()` + `navVM.start(...)`. While navigating it swaps the
-    search + route-status overlay for the maneuver card. The components don't
-    know each other.
-- **[Implemented]** Routing (M3 — see §5 item 26) + turn-by-turn (M4.3 — item 29):
+    search + route-status overlay for the maneuver card. **M4.4:** a bottom
+    overlay (a `TimelineView` so the ETA stays current) shows the
+    `RouteInfoPanelView` — in preview the panel and the Start button sit
+    side-by-side in one row (panel flexible/larger, button `fixedSize` on the
+    right); while navigating the live panel is on its own, full width. The
+    components don't know each other.
+- **[Implemented]** Routing (M3 — see §5 item 26) + turn-by-turn (M4.3 — item 29)
+  + route info / ETA (M4.4 — item 30):
   - `Route` — SDK-neutral: `polyline: [MapCoordinate]`, `distanceMeters`,
     `duration: Duration`, and **`steps: [RouteStep]`** (M4.3; `[]` for a route
     computed without step data). The drawn overview polyline is unchanged.
@@ -662,8 +687,10 @@ not replace their responsibilities.
     **Advanced** SKU (still free-tier for one user, once per trip — see §5/§9).
   - `GooglePolyline.decode(_:)` — pure encoded-polyline decoder.
   - `RouteGeometry` (M4.3) — pure geodesic helpers: haversine `distance`,
-    polyline `length`, and `project(_:onto:)` (closest point on a polyline +
-    distance-from-input + distance-along, via a local equirectangular frame).
+    polyline `length`, `project(_:onto:)` (closest point + distance-from-input +
+    distance-along, via a local equirectangular frame), and **M4.4**
+    `remainingPolyline(of:from:)` — the part of a polyline still ahead of a point
+    (projection onward), `[]` once past the end.
   - `NavigationProgress` / `NavigationProgressCalculator` (M4.3) — the pure
     progress engine. Progress is one scalar `traveledMeters` along the
     concatenated step geometry; `stepIndex` is the upcoming maneuver,
@@ -675,17 +702,38 @@ not replace their responsibilities.
     pattern (SDK-free, no `LocationStore`). `start(route:from:)` / `stop()` /
     `update(with:)`; `state` = `inactive` / `navigating(NavigationProgress)` /
     `arrived`; builds the `ManeuverCard` (icon + primary text + road + distance,
-    or the arrival card).
+    or the arrival card). **M4.4:** `routeInfo(now:)` → the live `RouteInfo`
+    (`nil` when inactive or arrived).
+  - `NavigationProgress.remainingDuration(along: route)` (M4.4) — pure: scales
+    `route.duration` by the fraction of `distanceRemainingMeters` left (no
+    traffic model), `.zero` on arrival or a zero-length route. Keeps the ETA
+    consistent with the distance shown; never re-derives the route.
+  - `RouteFormat` (M4.4) — pure SDK-neutral formatters: `distance(meters:)`
+    ("40 m" / "1.4 km" / "23 km"), `duration(_:)` ("< 1 min" / "8 min" /
+    "1 hr 15 min"), `time(_:locale:timeZone:)` (a locale/time-zone-aware clock
+    string via `Date.FormatStyle`; both injectable, default to the viewer's).
+    Plus `Duration.inSeconds`. Deliberately separate from the maneuver-countdown
+    `NavigationDistance` (that one has a "Now" band).
+  - `RouteInfo` (M4.4) — the SDK-neutral panel model. `.preview(route:now:…)` →
+    whole-route distance + duration, ETA = now + duration. `.remaining(route:
+    progress:now:…)` → `progress.distanceRemainingMeters` + `remainingDuration`,
+    ETA = now + that. `Kind` (`.preview` / `.remaining`) carries the distinct
+    column labels. Reuses `Route` + `NavigationProgress` — no duplicate maths.
+  - `RouteInfoPanelView` (M4.4) — presentational bottom panel: three stats
+    (distance · time · ETA). The `.remaining` variant is blue-accented and
+    labelled "Remaining / Time left / ETA"; the `.preview` variant is plain
+    material, "Distance / Time / Arrival".
   - `RouteViewModel` — SDK-free, holds no `LocationStore`: `requestRoute(to:from:)`
     takes the chosen `Destination?` + the latest origin (passed in by the
     composing view), exposes `state` (`idle` / `loading` / `loaded(Route)` /
     `noCurrentLocation` / `failed(RouteError)`), cancels any in-flight request.
     **No automatic rerouting** — a new request only happens on a destination
     change or an explicit Retry.
-  - `MapViewModel.setRoute(_ route: Route?)` — sets `content.polylines` to one
-    `MapPolyline(id: "route", …)` (or `[]`). **Never touches the camera** outside
-    `.destinationPreview`. `setDestination(_:)` also clears the previous route +
-    nav progress.
+  - `MapViewModel.setRoute(_ route: Route?)` — stores the route and rebuilds the
+    drawn line via `refreshRoutePolyline()` (full route in preview / cruising,
+    the road ahead while `.navigating` — M4.4). **Never touches the camera**
+    outside `.destinationPreview`. `setDestination(_:)` also clears the previous
+    route + nav progress.
   - `RouteStatusView` — a small transient `.regularMaterial` pill under the
     search card: spinner + "Finding route…", "Waiting for GPS…", or "Route
     unavailable" + Retry. Nothing while idle or loaded. Hidden entirely once
@@ -713,9 +761,11 @@ not replace their responsibilities.
   then swaps the marker's icon (code-drawn blue dot vs blue arrowhead) and sets
   `marker.rotation` = the bearing. No `GoogleMapProvider` change was needed for
   M3; M4.1 replaced only the default-red-pin vehicle marker.
-  **M4.2:** `applyCamera` handles `.navigation` (`viewingAngle` = pitch, bottom
-  `mapView.padding` = viewport-height × `focusBelowCentre`); `.follow` / `.fit`
-  reset the padding. `idleAt` reports `byUserGesture` from
+  **M4.2 / M4.4:** `applyCamera` handles `.navigation` (`viewingAngle` = pitch;
+  the vehicle is anchored at `vehicleVerticalAnchor` of the height by padding the
+  top by `(2·anchor − 1)·H` — GMS centres the target in the un-padded region, so
+  top padding pushes it *down*); `.follow` / `.fit` reset the padding.
+  `idleAt` reports `byUserGesture` from
   `UserGestureLatch` — a pure `nonisolated struct` (unit-tested, no GMS) that
   `willMove(byGesture:)` latches on for any user gesture and `idleAt` consumes.
   The latch is deliberate: a programmatic follow animation can fire *between* a
@@ -724,8 +774,10 @@ not replace their responsibilities.
   any real pan/zoom/rotate, however small, drops follow; a purely programmatic
   move never sets the latch, so there is no feedback loop.
   **M4.3:** no `GoogleMapProvider` change — the dynamic navigation zoom rides in
-  on `MapCameraState.zoom` inside the existing `.navigation` plan, which the
-  camera-move path already applies.
+  on `MapCameraState.zoom` inside the existing `.navigation` plan.
+  **M4.4:** the only `GoogleMapProvider` change is the `.navigation` padding
+  above — the shortened route line is still just a `MapPolyline` the existing
+  `GMSPolyline` sync path draws.
 - **[Implemented]** `GoogleMapsConfiguration` — reads `GoogleMapsAPIKey` from the
   bundle (build-injected, see §9), exposes it as `apiKey`, and calls
   `GMSServices.provideAPIKey`; returns `false` and does nothing if unset. No key
@@ -849,23 +901,37 @@ not replace their responsibilities.
   vehicle + destination + route, clearing it re-fits back, a later fix does not
   move it; in `.cruising` the camera is never touched**). **The live Routes API
   is not called** — canned data / a mock transport stand in.
-- **[Verified · automated]** `NavigationTests` (M4.3): `RouteGeometry` (haversine,
-  polyline length, point→polyline projection incl. end-clamping);
-  `NavigationProgressCalculator` — initial maneuver + distance, distance-to-
-  maneuver shrinks along a step, passing a maneuver advances by one, **a single
-  on-route fix two maneuvers ahead advances only one**, **a fix ~2 km off-route
-  is ignored and progress is unchanged**, progress is monotonic, walking the whole
-  route flips `isArrived`, a step-less route is benign; `NavigationViewModel` —
-  starts inactive, `start` needs a route + an origin, updates advance the card,
-  arrival shows the arrival card, `stop` resets; `ManeuverCard` / `NavigationDistance`
-  formatting + `ManeuverType` phrase/symbol/`warrantsCloserView`; `MapViewModel`
-  navigation camera — `startNavigation()` is gated on route + fix + preview mode,
-  the plan tilts + sits the vehicle below centre, **no progress → base zoom**,
-  **nearing a significant turn zooms in and eases back to base after**, a
-  non-significant maneuver never zooms, the zoom is quantised to a handful of
-  0.5-steps, **follow-off freezes the camera against progress updates**, recenter
-  restores navigation follow, leaving navigation clears the progress + zoom.
+- **[Verified · automated]** `NavigationTests` (M4.3 + M4.4): `RouteGeometry` —
+  haversine / length / point→polyline projection incl. end-clamping, and **M4.4**
+  `remainingPolyline` (whole route at the start, starts under the vehicle +
+  ends at the destination mid-route, only ever shrinks, `[]` past the end,
+  degenerate input returned untouched); `NavigationProgressCalculator` — initial
+  maneuver + distance, distance shrinks along a step, one maneuver per fix, **a
+  single on-route fix two maneuvers ahead advances only one**, **a fix ~2 km
+  off-route is ignored**, monotonic, full-route walk → `isArrived`, step-less
+  route benign; `NavigationViewModel` — inactive / start needs route + origin /
+  card advances / arrival card / stop; `ManeuverCard` / `NavigationDistance` /
+  `ManeuverType`; `MapViewModel` navigation camera — start-gate, the plan tilts +
+  **anchors the vehicle a little below centre (0.5 < anchor < 0.7)**, no
+  progress → base zoom, nearing a significant turn zooms in and eases back,
+  non-significant never zooms, quantised, follow-off freezes it, recenter
+  restores, leaving clears progress + zoom; **M4.4 route rendering** — full route
+  while previewing (unchanged by later fixes), clipped to the road ahead while
+  navigating, shrinks further as the vehicle advances, cleared on arrival and on
+  End, and `vm.route.polyline` stays the full geometry throughout.
   **No SDK, no live Routes API.**
+- **[Verified · automated]** `RouteInfoTests` (M4.4): `RouteFormat` — distance
+  bands + km switch, duration to minutes then hours, and that the clock string
+  **follows the injected locale** (en_US "3:45 PM" vs en_GB "15:45") **and time
+  zone** (NY 15:45 → LA 12:45); `Duration.inSeconds` for whole / fractional
+  values; `remainingDuration(along:)` scales by distance fraction, is `.zero` on
+  arrival / for a zero-length route, and clamps an overshoot;
+  `RouteInfo.preview` / `.remaining` build the right figures and ETA
+  (now + duration / now + remaining), the two `Kind`s carry distinct labels;
+  **edge cases** — arrival (0 m / "< 1 min" / ETA = now) and a 3 m remaining
+  distance ("0 m"); `NavigationViewModel.routeInfo` is `nil` inactive, live once
+  navigating, `nil` again after arrival. **Pure — ETA computed from an injected
+  `now`, no real clock.**
 - **[Verified · on device / simulator]** Dash builds (clean, no warnings). Before
   the M1 pass it launched, initialised the Google Maps SDK (v11.1.0), and
   rendered the map + vehicle marker.
@@ -908,7 +974,18 @@ not replace their responsibilities.
   **dynamic maneuver zoom** tightens approaching a turn and eases back after; a
   manual pan/zoom still drops follow and recenter restores navigation follow; the
   route line + vehicle indicator stay correct. Builds clean (app + device), +37
-  unit tests. Working tree (not committed).
+  unit tests. Committed `a262a9c`.
+- **[Verified · on device]** **M4.4** route info & ETA on the physical iPad —
+  the developer confirmed the preview panel (distance / travel time / arrival
+  time), the swap to the live "Remaining / Time left / ETA" panel on Start, and
+  the figures updating as the vehicle moves. **Not committed.**
+- **[Not yet verified on device — installed, awaiting a check]** **M4.4 polish
+  pass** (working tree): the navigation camera anchoring the vehicle a little
+  below centre; the route line clipping to the road ahead as the drive
+  progresses (and clearing on arrival); the preview info-panel + Start button
+  sharing one bottom row without clipping in portrait *or* landscape. Builds
+  clean (app + device), +12 unit tests, installed on the iPad. The geometry +
+  camera-plan inputs/outputs are unit-tested; what remains is a visual check.
 
 ### End-to-end
 
@@ -947,11 +1024,11 @@ not replace their responsibilities.
 |---|---:|---|
 | `DashSharedTests` | 8 | `swift test` |
 | `DashRelayTests` | 32 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
-| `DashTests` | 202 (per the Xcode test plan; incl. 1 no-op scaffold; +29 M3, +12 M4.1, +20 M4.2, +37 M4.3) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+| `DashTests` | 231 (per the Xcode test plan; incl. 1 no-op scaffold; +29 M3, +12 M4.1, +20 M4.2, +37 M4.3, +17 M4.4, +12 M4.4-polish) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
 
 Last full run (`xcodebuild test -scheme Dash -only-testing:DashTests`, iPad
-simulator, 2026-09-02, with M4.3 in the working tree): all pass (**TEST
-SUCCEEDED**, 202 / 202, 0 failures), build clean (app + device) with no warnings.
+simulator, 2026-09-02, with M4.4 + the polish pass in the working tree): all
+pass (0 failures), build clean (app + device) with no warnings.
 
 `DashSharedTests` breakdown: `LocationPacketTests` (4), `RelayAdvertisementTests` (4).
 `DashRelayTests` breakdown: `LocationTrackerTests` (7), `LocationBroadcasterTests`
@@ -970,8 +1047,11 @@ in `MapContentTests.swift`; `GooglePlaceSuggestionMappingTests` +
 `GoogleMapVehicleStyleTests` (M4.1) in `VehicleIndicatorTests.swift`;
 `CruisingFollowTests` + `PreviewUnchangedTests` + `NavigatingCameraTests` +
 `UserGestureLatchTests` (20 total, M4.2) in `CameraFollowTests.swift`;
-`RouteGeometryTests` + `NavigationProgressTests` + `NavigationViewModelTests` +
-`ManeuverCardModelTests` + `NavigationCameraTests` (M4.3) in `NavigationTests.swift`.
+`RouteGeometryTests` (+ M4.4 `remainingPolyline`) + `NavigationProgressTests` +
+`NavigationViewModelTests` + `ManeuverCardModelTests` + `NavigationCameraTests` +
+`RemainingRouteRenderTests` (M4.4 route clipping) in `NavigationTests.swift`;
+`RouteFormatTests` + `DurationInSecondsTests` + `RemainingDurationTests` +
+`RouteInfoTests` + `NavigationRouteInfoTests` (M4.4) in `RouteInfoTests.swift`.
 (Map / search / routing have no SDK-level tests — `GoogleMapProvider` /
 `GMSMapView` (incl. the M4.1 vehicle-marker drawing and the M4.2 `.navigation`
 camera / gesture wiring), `GooglePlaceSearchService` / `GMSPlacesClient`, and the
@@ -1376,11 +1456,13 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
       follow mode) and wired to `recenter()`.
     - **`MapCameraPlan.navigation(state, pitchDegrees:, focusBelowCentre:)`** —
       the distinct `.navigating` framing: `GoogleMapProvider` sets
-      `viewingAngle` = pitch and bottom `mapView.padding` = viewport-height ×
-      `focusBelowCentre` so the vehicle sits below centre with more road ahead;
-      `state.headingDegrees` becomes the camera bearing. `.follow` / `.fit` reset
-      the padding. Constants live on `MapViewModel`
-      (`navigationPitchDegrees = 55`, `navigationFocusBelowCentre = 0.28`).
+      `viewingAngle` = pitch and (as shipped in M4.2) bottom `mapView.padding` =
+      viewport-height × `focusBelowCentre`; `state.headingDegrees` becomes the
+      camera bearing. `.follow` / `.fit` reset the padding. Constants on
+      `MapViewModel` (`navigationPitchDegrees = 55`, then `0.28`).
+      *(M4.4 renamed this to `vehicleVerticalAnchor` and switched to top padding —
+      the M4.2 version actually pushed the vehicle above centre; see item 30's
+      polish pass.)*
     - **`.navigating` has no entry point yet.** Nothing in the M4.2 UI calls
       `setMode(.navigating)`, so the navigation camera is code + tests only until
       the "start navigation" flow lands (M4.3, below).
@@ -1432,7 +1514,62 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
       `MapCameraState.zoom` inside the existing `.navigation` plan.
     - **Physically verified on the iPad** (Start Navigation, maneuver card +
       updates, route progress, navigation follow / recenter, dynamic maneuver
-      zoom). Working tree — not committed.
+      zoom). Committed `a262a9c`.
+
+30. **Map "M4.4": route info & ETA (2026-09-02).** Adds a bottom route-info
+    panel — distance / travel time / ETA — to the route preview, and live
+    remaining figures during navigation. **Display only — no new route data, no
+    traffic, no rerouting, no dashboard.**
+    - **Reuses the existing models.** `RouteInfo` is built from `Route.duration`
+      / `Route.distanceMeters` (preview) or `NavigationProgress.distanceRemainingMeters`
+      + a new `NavigationProgress.remainingDuration(along:)` (live). There is no
+      second route computation and no new field on the wire / DTO.
+    - **Remaining duration is proportional, not traffic-aware.**
+      `remainingDuration` = `route.duration` × (distance left ÷ total distance).
+      Deliberate: it stays consistent with the distance shown and needs no extra
+      API call. A real ETA that reacts to traffic is a later task (needs
+      `routingPreference: TRAFFIC_AWARE` — a billing change).
+    - **Formatting is pure and outside the views.** `RouteFormat` (distance /
+      duration / clock) + `Duration.inSeconds` live in `Routing/`, fully
+      unit-tested. The ETA **clock string uses `Date.FormatStyle` with the
+      viewer's locale + time zone** (both injectable so tests can pin them) —
+      no hardcoded "h:mm a".
+    - **ETA is computed from `now` at render.** `ContentView` wraps the panel in
+      a `TimelineView(.periodic(by: 30))` so a stationary preview ETA still rolls
+      over; during navigation it also recomputes on every fix (state change).
+    - **Preview vs live are visually + label-distinct** (item 4): the preview
+      panel is plain material, "Distance / Time / Arrival"; the live panel is
+      blue-accented, "Remaining / Time left / ETA". They never show at once (mode
+      switch), and the maneuver card / Start button / camera are untouched.
+    - **Physically verified on the iPad** (preview panel, swap to the live panel
+      on Start, figures updating as the vehicle moves). Not committed.
+
+    **Polish pass (2026-09-02, also working tree):**
+    - **Navigation camera — vehicle below centre.** `MapCameraPlan.navigation`
+      now carries `vehicleVerticalAnchor` (fraction of the viewport height from
+      the top; `MapViewModel.navigationVehicleAnchor = 0.6`).
+      `GoogleMapProvider` pads the top by `(2·anchor − 1)·H` — GMS centres the
+      camera target in the region left after padding, so top padding pushes the
+      vehicle *down*. The old code used *bottom* padding, which pushed it above
+      centre; the pitch / dynamic zoom / follow / recenter / user-pan behaviour
+      is otherwise unchanged.
+    - **Progressively shortened route line.** A private
+      `MapViewModel.refreshRoutePolyline()` (called from `update` / `setMode` /
+      `setRoute` / `setDestination`) sets `content.polylines` to
+      `RouteGeometry.remainingPolyline(of: route.polyline, from: vehicle)` while
+      `.navigating` (the road still ahead), the whole route in preview /
+      cruising, and `[]` on arrival / no route. The `Route` model and its
+      `polyline` are never mutated — the render geometry is derived each fix from
+      the M4.3 projection. `GoogleMapProvider` still just draws the `MapPolyline`
+      it is handed.
+    - **Preview bottom row.** In `.destinationPreview` the `RouteInfoPanelView`
+      and `StartNavigationButton` share one `HStack` (panel `maxWidth: .infinity`
+      + larger, button `fixedSize` on the right), capped at 620 pt with the
+      existing 16 pt / 28 pt margins — fits portrait and landscape. The live nav
+      panel stays on its own row. `RouteInfo` content and Start behaviour are
+      unchanged.
+    - **Not yet device-verified** — installed on the iPad; geometry + camera-plan
+      I/O are unit-tested, the visual check is pending (§3, §10).
 
 ---
 
@@ -1510,9 +1647,28 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
 - **M4.3: the maneuver arrow set is approximate.** `ManeuverType.symbolName`
   maps to SF Symbols; a few (sharp turns, forks, ramps) reuse near-neighbours
   rather than exact glyphs.
-- **M4.3: no ETA / distance-remaining shown.** `NavigationProgress` carries
-  `distanceRemainingMeters` and `Route.duration`, but the card only shows the
-  next maneuver — an ETA / trip panel is a later task.
+- **M4.4: ETA is a proportional estimate, not traffic-aware.** Remaining time =
+  route duration × (distance left ÷ total). It tracks distance faithfully but
+  does not react to congestion, and it assumes a roughly constant average speed
+  along the route. A live traffic ETA needs `routingPreference: TRAFFIC_AWARE`
+  on the Routes request (a billing change) and is a later task.
+- **M4.4: the preview ETA only refreshes every ~30 s.** It is inside a
+  `TimelineView(.periodic(by: 30))`, so a preview left open ticks over on a
+  ~30 s cadence rather than exactly on the minute. During navigation it also
+  refreshes on each GPS fix.
+- **M4.3: no trip panel / average speed.** `Route.duration` /
+  `distanceRemainingMeters` now feed the info panel, but there is still no
+  average / max speed or elapsed-time trip computer (that's the Speedometer
+  milestone).
+- **M4.4-polish: the shortened route line snaps to the overview polyline.**
+  `remainingPolyline` projects the vehicle onto `route.polyline` (the overview
+  geometry, ~coarser than the per-step polylines). On a route that doubles back
+  close to itself the projection can jump, briefly clipping the wrong part; there
+  is no off-route detection to catch this. Fine for ordinary routes.
+- **M4.4-polish: the navigation camera anchor is a fixed fraction.**
+  `vehicleVerticalAnchor = 0.6` is not aware of the actual on-screen panel /
+  maneuver-card heights or the device aspect ratio — it is a constant chosen to
+  clear them comfortably in both orientations, not a computed inset.
 - **M4.2: gesture detection trusts `willMove(byGesture:)`.** Any user
   pan/zoom/rotate drops follow — there is no distance/zoom threshold (the
   earlier `isMeaningfulMove` heuristic was removed 2026-09-02 after device
@@ -1638,12 +1794,19 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
   (§5 item 29): `Route.steps` / `RouteStep`, `GoogleRouteService` step + maneuver
   mapping, `RouteGeometry` / `NavigationProgressCalculator` / `NavigationViewModel`,
   `ManeuverCardView` / `StartNavigationButton`, `MapViewModel.startNavigation()` +
-  dynamic navigation zoom. Physically verified on the iPad (§3, §10). Working tree
-  — not committed.
+  dynamic navigation zoom. Physically verified on the iPad (§3, §10). Committed
+  `a262a9c`.
+- **[Implemented · unit-tested, device-unverified]** M4.4 route info & ETA (§5
+  item 30): `RouteFormat` + `Duration.inSeconds`,
+  `NavigationProgress.remainingDuration(along:)`, `RouteInfo` (preview / live),
+  `RouteInfoPanelView`, `NavigationViewModel.routeInfo(now:)`, the `ContentView`
+  bottom `TimelineView` panel. Installed on the iPad; visual / layout check
+  pending (§3, §10). Working tree — not committed.
 - **[Planned]** Map layer depth, remaining (the rest of **M4**): off-route
-  detection + rerouting, alternative routes, an ETA / trip panel, voice guidance,
-  lane guidance. Also: turning a map POI tap (`MapEvent.tappedPOI`) into a
-  destination; an Apple `MKDirections` `RouteService`.
+  detection + rerouting, alternative routes, a **traffic-aware** ETA
+  (`routingPreference: TRAFFIC_AWARE`), voice guidance, lane guidance. Also:
+  turning a map POI tap (`MapEvent.tappedPOI`) into a destination; an Apple
+  `MKDirections` `RouteService`.
 - **[Planned]** Dock-style row of favourite/frequent destinations.
 - **[Future idea]** Weather widget (WeatherKit free tier).
 - **[Future idea]** Parking-location auto-pin on Bluetooth disconnect.
@@ -1680,7 +1843,7 @@ Roughly in order (adapts the spec §11 build order to where we are):
 7. **`AppleMapProvider` + Settings toggle** — second provider, persisted choice.
 
 Map-feature sub-track (independent of the above ordering; **M1 + M2 + M3 + M4.1 +
-M4.2 committed; M4.3 in the working tree**):
+M4.2 + M4.3 committed; M4.4 in the working tree**):
 - **M1 [done]** — widen the rendering boundary for overlays / events / modes
   (§5 item 24).
 - **M2 [done, device-verified for autocomplete]** — `PlaceSearchService` + Google
@@ -1699,16 +1862,21 @@ M4.2 committed; M4.3 in the working tree**):
   `followsVehicle` state, `RecenterButton`, threshold-free user-gesture detection
   in `GoogleMapProvider` (`UserGestureLatch` over `willMove(byGesture:)`), and the
   `MapCameraPlan.navigation` framing. §5 item 28. **Camera framing only.**
-- **M4.3 [done, device-verified, unit-tested (+37); not committed]** —
-  `Route.steps` / `RouteStep`, `GoogleRouteService` step + maneuver mapping, the
-  pure `RouteGeometry` / `NavigationProgressCalculator` engine,
-  `NavigationViewModel`, the `ManeuverCardView` + `StartNavigationButton`,
+- **M4.3 [done, device-verified, committed `a262a9c`]** — `Route.steps` /
+  `RouteStep`, `GoogleRouteService` step + maneuver mapping, the pure
+  `RouteGeometry` / `NavigationProgressCalculator` engine, `NavigationViewModel`,
+  the `ManeuverCardView` + `StartNavigationButton`,
   `MapViewModel.startNavigation()` and the quantised dynamic navigation zoom.
-  §5 item 29. **Guidance display + camera only** — no off-route detection /
-  rerouting / alternatives / voice / lane guidance / dashboard.
-- **M4.4+** — off-route detection + rerouting, alternative routes, an ETA / trip
-  panel; then heading smoothing, voice guidance, and the POI-tap → destination
-  path.
+  §5 item 29. **Guidance display + camera only.**
+- **M4.4 [code done, unit-tested (+17); not committed; installed on the iPad,
+  visual check pending]** — `RouteFormat` + `Duration.inSeconds`,
+  `NavigationProgress.remainingDuration(along:)`, `RouteInfo` (preview / live
+  builders), `RouteInfoPanelView`, `NavigationViewModel.routeInfo(now:)`, and the
+  `ContentView` `TimelineView` bottom panel. §5 item 30. **Display only** — no
+  new route data, no traffic, no rerouting.
+- **M4.5+** — off-route detection + rerouting, alternative routes, a
+  **traffic-aware** ETA (`TRAFFIC_AWARE`); then heading smoothing, voice
+  guidance, and the POI-tap → destination path.
 8. **Polish pass** — `ThemeManager`, idle-timer disable, hide iPadOS chrome,
    favourites dock, landscape-primary orientation config.
 
@@ -1817,7 +1985,8 @@ Git history on `main` (newest first):
 
 | Commit | Milestone |
 |---|---|
-| *(working tree, uncommitted)* | **Map "M4.3": start navigation & maneuver guidance** (guidance display + camera only — **no** off-route detection, rerouting, alternative routes, traffic switching, voice, lane guidance, ETA, or dashboard work). `Route` gained **`steps: [RouteStep]`** (SDK-neutral `ManeuverType` + instruction + road name + point + step polyline + distance; defaults `[]`). `GoogleRouteService`: field mask adds `routes.legs.steps.*`, private DTOs + the Google `Maneuver` → `ManeuverType` table + an "onto/on/toward" road-name heuristic all stay in-file (step fields = Routes **Advanced** SKU, still free-tier once-per-trip). New pure engine in `Routing/`: **`RouteGeometry`** (haversine / polyline length / point→polyline projection) and **`NavigationProgressCalculator`** — progress is one monotone `traveledMeters` scalar; a fix advances the displayed maneuver **by ≤ 1** and a fix > ~80 m off every step is ignored, so noise never skips a turn. **`NavigationViewModel`** (`@MainActor`, mirrors `RouteViewModel`; `inactive` / `navigating(NavigationProgress)` / `arrived`) builds a **`ManeuverCard`**. **`ManeuverCardView`** (top-of-map, CarPlay-style: arrow + big distance + instruction/road + End) and **`StartNavigationButton`** are presentational; `ContentView` swaps the search + route-status overlay for the card while navigating and wires the fix pump → `navVM.update` → `mapVM.setNavigationProgress`. **`MapViewModel.startNavigation()`** (gated on route + a fix + preview mode) enters `.navigating`; the follow camera keeps M4.2's tilt/below-centre framing and overrides the zoom via pure **`navigationZoom(...)`** — base until ~350 m from a `warrantsCloserView` maneuver, ramping to `+1.5` by ~40 m, **quantised to 0.5 steps**, easing back after; follow-off freezes it; recenter restores nav follow. **No `GoogleMapProvider` change.** Tests: new **`NavigationTests` (+~33)** + `RouteTests` (+4). Build clean (app + device), no warnings; full `DashTests` green (202 / 202). **Physically verified on the iPad** — Start Navigation, maneuver card + live updates, route progress, navigation follow / recenter, dynamic maneuver zoom all work. §5 item 29. |
+| *(working tree, uncommitted)* | **Map "M4.4": route info & ETA** (display only — **no** new route data, traffic-aware routing, rerouting, off-route detection, alternatives, voice, or dashboard work). A bottom **`RouteInfoPanelView`** shows distance · travel time · arrival time: over the route preview it's the whole-route figures with ETA = now + `Route.duration`; during navigation it swaps to remaining distance (from `NavigationProgress`) · remaining time (**new `NavigationProgress.remainingDuration(along:)` — `route.duration` × distance-fraction-left, no traffic model**) · ETA = now + that. Formatting is pure + SDK-neutral: **`RouteFormat`** (`distance` / `duration`) + **`Duration.inSeconds`** in `Routing/`; the ETA clock string uses **`Date.FormatStyle` with the viewer's locale + time zone** (both injectable for tests — no hardcoded format). **`RouteInfo`** (`.preview(route:)` / `.remaining(route:progress:)`, `Kind` carrying distinct labels) builds the model from the existing `Route` + `NavigationProgress` — no duplicate route maths. **`NavigationViewModel.routeInfo(now:)`** exposes the live info (`nil` inactive / arrived). `ContentView` shows the panel in a bottom `TimelineView(.periodic(by: 30))` (so a stationary preview ETA still ticks; nav also refreshes per fix), above the Start button; the preview panel is plain material ("Distance / Time / Arrival"), the live one blue-accented ("Remaining / Time left / ETA"). Maneuver card / Start button / camera **untouched**. Tests: new **`RouteInfoTests` (17)**. Build clean (app + device), no warnings. **Device-verified** (preview panel, swap to live panel on Start, figures updating with movement). **Polish pass (same working tree):** (1) `MapCameraPlan.navigation` gains `vehicleVerticalAnchor` — the vehicle sits *slightly below* centre (was pushed above; `GoogleMapProvider` turns the anchor into top viewport padding); (2) during navigation the drawn route line is clipped to the road still ahead (`RouteGeometry.remainingPolyline` off `route.polyline` + the M4.3 projection — `Route` never mutated), full route in preview / cruising, cleared on arrival / End; (3) in preview the info panel + Start button share one bottom row (panel flexible/larger, button hugging right). Start / maneuver-card / follow-recenter / user-pan behaviour and `RouteInfo` content unchanged. Tests: +12 (`NavigationTests` `remainingPolyline` + `RemainingRouteRenderTests` + camera-anchor). Full `DashTests` green (231). Installed on the iPad; polish visual check pending. §5 item 30. |
+| `a262a9c` | **Map "M4.3": start navigation & maneuver guidance** (guidance display + camera only — **no** off-route detection, rerouting, alternative routes, traffic switching, voice, lane guidance, ETA, or dashboard work). `Route` gained **`steps: [RouteStep]`** (SDK-neutral `ManeuverType` + instruction + road name + point + step polyline + distance; defaults `[]`). `GoogleRouteService`: field mask adds `routes.legs.steps.*`, private DTOs + the Google `Maneuver` → `ManeuverType` table + an "onto/on/toward" road-name heuristic all stay in-file (step fields = Routes **Advanced** SKU, still free-tier once-per-trip). New pure engine in `Routing/`: **`RouteGeometry`** (haversine / polyline length / point→polyline projection) and **`NavigationProgressCalculator`** — progress is one monotone `traveledMeters` scalar; a fix advances the displayed maneuver **by ≤ 1** and a fix > ~80 m off every step is ignored, so noise never skips a turn. **`NavigationViewModel`** (`@MainActor`, mirrors `RouteViewModel`; `inactive` / `navigating(NavigationProgress)` / `arrived`) builds a **`ManeuverCard`**. **`ManeuverCardView`** (top-of-map, CarPlay-style: arrow + big distance + instruction/road + End) and **`StartNavigationButton`** are presentational; `ContentView` swaps the search + route-status overlay for the card while navigating and wires the fix pump → `navVM.update` → `mapVM.setNavigationProgress`. **`MapViewModel.startNavigation()`** (gated on route + a fix + preview mode) enters `.navigating`; the follow camera keeps M4.2's tilt/below-centre framing and overrides the zoom via pure **`navigationZoom(...)`** — base until ~350 m from a `warrantsCloserView` maneuver, ramping to `+1.5` by ~40 m, **quantised to 0.5 steps**, easing back after; follow-off freezes it; recenter restores nav follow. **No `GoogleMapProvider` change.** Tests: new **`NavigationTests` (+~33)** + `RouteTests` (+4). Build clean (app + device), no warnings; full `DashTests` green (202 / 202). **Physically verified on the iPad** — Start Navigation, maneuver card + live updates, route progress, navigation follow / recenter, dynamic maneuver zoom all work. §5 item 29. |
 | `d8b291e` | **Map "M4.2": camera follow, manual pan/zoom & recenter** (camera framing only — **no** turn-by-turn, maneuvers, ETA, rerouting, voice, navigation UI, or dashboard work). New `@Published MapViewModel.followsVehicle` (on by default): in `.cruising` / `.navigating`, `update(with:)` re-derives the rendered camera each fix only while follow is on; otherwise the `VehicleIndicator` moves under a fixed camera. **`.destinationPreview` is untouched** — still a one-shot `.fit`, no re-frame on a fix, and a pan there does not drop follow. New `recenter()` / `showsRecenterButton`; `setMode` / `setDestination` re-arm follow. New **`MapCameraPlan.navigation(state, pitchDegrees:, focusBelowCentre:)`** — tilted, vehicle-below-centre framing for `.navigating` (constants on `MapViewModel`: pitch 55°, focus 0.28). `GoogleMapProvider`: user-gesture vs programmatic split lives here — `MapEvent.cameraIdle(_, byUserGesture:)` is `true` for **any** user pan/zoom/rotate (no distance/zoom threshold) and `false` for programmatic moves, via a pure `UserGestureLatch` over GMS `willMove(byGesture:)` (latched so a follow animation firing mid-gesture can't mask it); `.navigation` sets `viewingAngle` + bottom `mapView.padding`. New presentational **`RecenterButton`** (SwiftUI, **not** in `GoogleMapProvider`), overlaid by `DashMapView` when `showsRecenterButton`. Tests: **`CameraFollowTests` (20)** + `MapContentTests` (2 renamed/expanded). Build clean, no warnings; `DashTests` green. **Device-verified** (cruising follow, any-size pan/zoom drops follow + shows recenter, recenter restores). *(The first pass used an `isMeaningfulMove` distance threshold; device testing showed small/fast gestures slipping through, so gesture detection was simplified to trust `willMove(byGesture:)` alone.)* §5 item 28. |
 | `8255749` | **Map "M4.1": current-location / vehicle indicator** (indicator only — **no** follow camera, navigation camera, ahead-of-vehicle framing, recenter, heading smoothing, or dashboard work). New SDK-neutral **`VehicleIndicator`** (`coordinate` + `headingDegrees: Double?`; `init(_ packet:)` validates the heading — negative / NaN → `nil`). `MapContent.vehicle` changes from `MapCoordinate` → `VehicleIndicator`; `MapViewModel.update(with:)` sets it from the latest `LocationPacket` (position + validated heading); `cameraPlan()` reads `.coordinate` — **camera logic byte-for-byte unchanged from M1**. `GoogleMapProvider`: the one vehicle `GMSMarker` is now `isFlat`, centre-anchored, `zIndex 1`, not tappable; **`vehicleStyle(for:)`** (pure `nonisolated static`, no GMS, unit-tested) → `.locationDot` / `.directionalPointer(rotationDegrees:)`; `syncVehicle(_:on:)` swaps a code-drawn **blue dot** (no heading) / **blue arrowhead** (heading) icon and sets `marker.rotation` = bearing. No `LocationPacket` / `LocationTracker` / relay change — heading was already on the wire. Tests: new **`VehicleIndicatorTests` (9)** + `MapContentTests` +3. Build clean, no warnings; full `DashTests` green (145). **Device-verified** (blue dot / rotating pointer, distinct from the red pin + blue route). §5 item 27. |
 | `28b5be5` | **Map "M3": routing** (routing only — no turn-by-turn, maneuvers, navigation / ahead-of-vehicle camera, vehicle heading/arrow, auto-rerouting, voice, or dashboard work). New `Features/Map/Routing/`: SDK-neutral **`RouteService`** protocol + `Route` (`polyline` / `distanceMeters` / `Duration`) + `RouteError`; **`GoogleRouteService`** — Google **Routes API** over `URLSession` (`Foundation` only, no GMS types; `TRAFFIC_UNAWARE` DRIVE `computeRoutes`, minimal field mask), transport + key accessor injected for tests; `GooglePolyline.decode` (pure encoded-polyline decoder); `RouteViewModel` (SDK-free, holds no `LocationStore`; `state` = `idle` / `loading` / `loaded(Route)` / `noCurrentLocation` / `failed`; one request per selection or Retry, cancels in-flight, **no auto-reroute**); `RouteStatusView` (small transient `.regularMaterial` pill: spinner / "Waiting for GPS" / "Route unavailable" + Retry — **not** a nav sheet, no ETA). `MapViewModel.setRoute(_ route: Route?)` puts one `MapPolyline(id: "route", …)` on `MapContent.polylines`, and — **only in `.destinationPreview`** — re-fits the `.fit` camera **once** around vehicle + destination + route so the whole route is visible (a later fix still does not move it — not navigation camera); `.cruising` camera untouched; `setDestination(_:)` clears the stale route. `GoogleMapProvider` **unchanged** — its M1 `GMSPolyline` sync path draws the route. `GoogleMapsConfiguration.apiKey` / `.infoPlistKey` marked `nonisolated` (plain `Bundle.main` read; no behaviour change). `ContentView` wires `destination → setDestination + requestRoute`, `routeVM.state(.loaded) → setRoute`. Also carries the **`X-Ios-Bundle-Identifier` header** (added during device verification — the key's iOS app restriction was 403-blocking the raw REST call). Tests: new **`RouteTests` (29)**. Build clean, no warnings. **Device-verified on the iPad:** live `computeRoutes` request succeeds, blue polyline draws, preview camera frames it — Routes API confirmed enabled + authorised (§3). §5 item 26. |
@@ -1909,5 +2078,24 @@ Git history on `main` (newest first):
   + `RouteTests` additions) cover the geodesic helpers, the progress engine
   (advance-by-one, ~80 m off-route rejection, arrival), the navigation view model
   + maneuver card, `MapViewModel`'s navigation camera / dynamic zoom, and the
-  Google step/maneuver parsing (canned JSON). Not committed. Off-route detection
-  / rerouting / voice remain out of scope (M4.4+).
+  Google step/maneuver parsing (canned JSON). Committed `a262a9c`. Off-route
+  detection / rerouting / voice remain out of scope (M4.5+).
+- **Map M4.4 — route info & ETA — device-verified.** The developer confirmed on
+  the physical iPad: the preview panel (distance / travel time / arrival time),
+  the swap to the live "Remaining / Time left / ETA" panel on Start, and the
+  figures updating as the vehicle moves. +17 unit tests (`RouteInfoTests`) cover
+  the distance / duration / clock formatters (incl. locale + time-zone
+  sensitivity), `Duration.inSeconds`, the proportional `remainingDuration`
+  (scaling / arrival → zero / overshoot clamp / zero-length route), the
+  `RouteInfo` builders + ETA arithmetic, the distinct panel labels, arrival +
+  sub-metre edge cases, and `NavigationViewModel.routeInfo`. Not committed.
+- **Map M4.4 polish — automated only; not yet seen on a screen.** +12 unit tests
+  cover `RouteGeometry.remainingPolyline` (whole route at the start / starts
+  under the vehicle + ends at the destination mid-route / only shrinks / `[]`
+  past the end / degenerate input) and `MapViewModel` route clipping (full in
+  preview, clipped while navigating, shrinks with progress, cleared on arrival /
+  End, `route.polyline` never mutated), plus the navigation camera anchor
+  (0.5 < anchor < 0.7). **Not seen on a real screen:** the vehicle sitting a
+  little below centre while navigating, the route line visibly shortening on a
+  drive, and the preview panel + Start button in one row in portrait *and*
+  landscape. Installed on the iPad. Not committed.

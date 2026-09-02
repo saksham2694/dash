@@ -98,6 +98,21 @@ nonisolated enum NavigationProgressCalculator {
     }
 }
 
+// MARK: - Remaining travel time (M4.4)
+
+extension NavigationProgress {
+
+    /// Estimated remaining travel time. M4.4 has no traffic model — this scales
+    /// the route's total `duration` by the fraction of distance still to go, so
+    /// it stays consistent with `distanceRemainingMeters` and never re-derives
+    /// the route. `.zero` on arrival or for a zero-length route.
+    nonisolated func remainingDuration(along route: Route) -> Duration {
+        guard route.distanceMeters > 0, !isArrived else { return .zero }
+        let fraction = min(1, max(0, distanceRemainingMeters / route.distanceMeters))
+        return .seconds(route.duration.inSeconds * fraction)
+    }
+}
+
 // MARK: - Route measurement
 
 /// Cumulative geometry of a route's steps. All distances in metres.

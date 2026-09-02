@@ -148,11 +148,16 @@ private struct GoogleMapContainer: UIViewRepresentable {
                 mapView.padding = .zero
                 move(mapView, to: state, pitch: 0, animated: animated)
 
-            case .navigation(let state, let pitch, let belowCentre):
-                // Push the visual centre down so the vehicle sits below it and
-                // more road ahead is on screen.
-                let inset = max(0, mapView.bounds.height * CGFloat(belowCentre))
-                mapView.padding = UIEdgeInsets(top: 0, left: 0, bottom: inset, right: 0)
+            case .navigation(let state, let pitch, let anchor):
+                // GMS centres the camera target in the region left after
+                // padding. To put the vehicle at `anchor` of the height from the
+                // top (> 0.5 = below centre, showing more road ahead), pad the
+                // top by (2·anchor − 1)·H — or the bottom, for an anchor above
+                // centre.
+                let height = mapView.bounds.height
+                let topInset = max(0, CGFloat(2 * anchor - 1)) * height
+                let bottomInset = max(0, CGFloat(1 - 2 * anchor)) * height
+                mapView.padding = UIEdgeInsets(top: topInset, left: 0, bottom: bottomInset, right: 0)
                 move(mapView, to: state, pitch: pitch, animated: animated)
 
             case .fit(let bounds, let padding):

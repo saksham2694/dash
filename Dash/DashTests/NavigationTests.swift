@@ -102,6 +102,62 @@ struct RouteGeometryTests {
         let projection = try! #require(RouteGeometry.project(before, onto: line))
         #expect(projection.distanceAlong == 0)
     }
+
+    // MARK: remainingPolyline (M4.4)
+
+    private var straightLine: [MapCoordinate] {
+        [MapCoordinate(latitude: 0, longitude: 0),
+         MapCoordinate(latitude: 0, longitude: oneKmDegrees),      // 1 km
+         MapCoordinate(latitude: 0, longitude: oneKmDegrees * 2),  // 2 km
+         MapCoordinate(latitude: 0, longitude: oneKmDegrees * 3)]  // 3 km
+    }
+
+    @Test("at the start, the remaining polyline is essentially the whole route")
+    func remainingAtStart() {
+        let remaining = RouteGeometry.remainingPolyline(of: straightLine, from: straightLine[0])
+        #expect(abs(RouteGeometry.length(remaining) - 3000) < 20)
+        #expect(remaining.last == straightLine.last)
+    }
+
+    @Test("mid-route, the remaining polyline starts at the vehicle and ends at the destination")
+    func remainingMidRoute() {
+        // ~1.5 km along, a touch off the line.
+        let here = MapCoordinate(latitude: 0.000_02, longitude: oneKmDegrees * 1.5)
+        let remaining = RouteGeometry.remainingPolyline(of: straightLine, from: here)
+
+        #expect(remaining.count >= 2)
+        #expect(remaining.last == straightLine.last)
+        #expect(abs(RouteGeometry.length(remaining) - 1500) < 30)      // ~half left
+        #expect(RouteGeometry.distance(remaining[0], here) < 10)       // starts under the vehicle
+        // The already-travelled first vertex is gone.
+        #expect(!remaining.contains(straightLine[0]))
+    }
+
+    @Test("the remaining polyline only ever shrinks as the vehicle advances")
+    func remainingMonotonicallyShrinks() {
+        var previous = Double.greatestFiniteMagnitude
+        for fraction in stride(from: 0.0, through: 1.0, by: 0.2) {
+            let here = MapCoordinate(latitude: 0, longitude: oneKmDegrees * 3 * fraction)
+            let length = RouteGeometry.length(
+                RouteGeometry.remainingPolyline(of: straightLine, from: here)
+            )
+            #expect(length <= previous + 1)
+            previous = length
+        }
+    }
+
+    @Test("past the end, nothing is left to draw")
+    func remainingPastEnd() {
+        let beyond = MapCoordinate(latitude: 0, longitude: oneKmDegrees * 4)
+        #expect(RouteGeometry.remainingPolyline(of: straightLine, from: beyond).isEmpty)
+    }
+
+    @Test("a degenerate polyline is returned untouched")
+    func remainingDegenerate() {
+        let single = [MapCoordinate(latitude: 1, longitude: 1)]
+        #expect(RouteGeometry.remainingPolyline(of: single, from: single[0]) == single)
+        #expect(RouteGeometry.remainingPolyline(of: [], from: single[0]).isEmpty)
+    }
 }
 
 // MARK: - Progress engine
@@ -392,18 +448,20 @@ struct NavigationCameraTests {
         #expect(vm.mode == .destinationPreview)
     }
 
-    @Test("the navigation camera plan tilts and sits the vehicle below centre")
+    @Test("the navigation camera plan tilts and anchors the vehicle a little below centre")
     func navigationCameraShape() {
         let vm = MapViewModel()
         _ = previewedRoute(vm)
         vm.startNavigation()
 
-        guard case .navigation(_, let pitch, let below) = vm.content.camera else {
+        guard case .navigation(_, let pitch, let anchor) = vm.content.camera else {
             Issue.record("expected a .navigation camera plan")
             return
         }
         #expect(pitch == MapViewModel.navigationPitchDegrees)
-        #expect(below == MapViewModel.navigationFocusBelowCentre)
+        #expect(anchor == MapViewModel.navigationVehicleAnchor)
+        #expect(anchor > 0.5) // below centre
+        #expect(anchor < 0.7) // not pushed excessively
     }
 
     @Test("with no progress the navigation zoom is the base zoom")
@@ -528,5 +586,105 @@ struct NavigationCameraTests {
         #expect(vm.mode == .cruising)
         #expect(vm.navigationProgress == nil)
         #expect(vm.content.camera == .follow(vm.camera))
+    }
+}
+
+// MARK: - Progressive route shortening (MapViewModel, M4.4)
+
+@MainActor
+@Suite("MapViewModel route rendering")
+struct RemainingRouteRenderTests {
+
+    private func fix(_ c: MapCoordinate) -> LocationPacket {
+        LocationPacket(latitude: c.latitude, longitude: c.longitude, speed: 12,
+                       heading: 90, timestamp: Date(timeIntervalSince1970: 1_756_700_000))
+    }
+
+    private func drawn(_ vm: MapViewModel) -> [MapCoordinate] {
+        vm.content.polylines.first?.coordinates ?? []
+    }
+
+    private func previewed(_ vm: MapViewModel) -> Route {
+        let route = lRoute()
+        vm.update(with: fix(route.polyline[0]))
+        vm.setDestination(Destination(placeID: "d", name: "Dest", address: nil,
+                                      coordinate: route.polyline.last!))
+        vm.setRoute(route)
+        return route
+    }
+
+    @Test("the full route is drawn while previewing")
+    func fullRouteInPreview() {
+        let vm = MapViewModel()
+        let route = previewed(vm)
+        #expect(drawn(vm) == route.polyline)
+    }
+
+    @Test("a later fix while previewing does not shorten the drawn route")
+    func previewNotShortenedByFixes() {
+        let vm = MapViewModel()
+        let route = previewed(vm)
+        vm.update(with: fix(route.polyline[2])) // "moved", but still previewing
+        #expect(drawn(vm) == route.polyline)
+    }
+
+    @Test("during navigation the drawn route is only the part still ahead of the vehicle")
+    func navigationShortensRoute() {
+        let vm = MapViewModel()
+        let route = previewed(vm)
+        vm.startNavigation()
+        let full = RouteGeometry.length(route.polyline)
+
+        vm.update(with: fix(route.polyline[2])) // ~2 km along a ~2.5 km route
+
+        let remaining = drawn(vm)
+        #expect(remaining.count >= 2)
+        #expect(remaining.last == route.polyline.last)          // still ends at the destination
+        #expect(!remaining.contains(route.polyline[0]))         // the travelled start is gone
+        #expect(RouteGeometry.length(remaining) < full - 1_000) // meaningfully shorter
+    }
+
+    @Test("advancing further shortens the drawn route further")
+    func routeKeepsShrinking() {
+        let vm = MapViewModel()
+        let route = previewed(vm)
+        vm.startNavigation()
+
+        vm.update(with: fix(route.polyline[1]))
+        let early = RouteGeometry.length(drawn(vm))
+        vm.update(with: fix(route.polyline[3]))
+        let late = RouteGeometry.length(drawn(vm))
+
+        #expect(late < early)
+    }
+
+    @Test("arriving at the destination leaves no stale route geometry")
+    func arrivalClearsRoute() {
+        let vm = MapViewModel()
+        let route = previewed(vm)
+        vm.startNavigation()
+        vm.update(with: fix(route.polyline.last!))
+        #expect(vm.content.polylines.isEmpty)
+    }
+
+    @Test("ending navigation (clearing the destination) removes the route line")
+    func endNavigationClearsRoute() {
+        let vm = MapViewModel()
+        _ = previewed(vm)
+        vm.startNavigation()
+        vm.update(with: fix(lRoute().polyline[1]))
+        #expect(vm.content.polylines.isEmpty == false)
+
+        vm.setDestination(nil)
+        #expect(vm.content.polylines.isEmpty)
+    }
+
+    @Test("the original Route is never mutated by rendering")
+    func routeModelUntouched() {
+        let vm = MapViewModel()
+        let route = previewed(vm)
+        vm.startNavigation()
+        vm.update(with: fix(route.polyline[2]))
+        #expect(vm.route?.polyline == route.polyline) // full geometry retained
     }
 }

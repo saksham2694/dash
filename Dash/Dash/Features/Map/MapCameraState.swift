@@ -10,10 +10,12 @@
 //      (centre / heading / zoom); the cruising vehicle-follow case.
 //    - `MapCameraPlan.fit` — "frame this region", resolved by the provider
 //      against its own viewport size; the route-preview case (M3).
-//    - `MapCameraPlan.navigation` — like `follow` but tilted and with the focal
-//      point pushed down so the vehicle sits below centre and more map is
-//      visible ahead; the `.navigating` case (M4.2). Still SDK-neutral — the
-//      provider turns the pitch / below-centre fraction into its own camera.
+//    - `MapCameraPlan.navigation` — like `follow` but tilted, and with the
+//      vehicle anchored at a chosen fraction of the viewport height from the top
+//      (`vehicleVerticalAnchor`, > 0.5 = slightly below centre) so more of the
+//      road ahead is visible; the `.navigating` case (M4.2, framing tuned in
+//      M4.4). Still SDK-neutral — the provider turns the pitch / anchor into its
+//      own camera + viewport padding.
 //
 
 import DashShared
@@ -70,9 +72,11 @@ nonisolated enum MapCameraPlan: Equatable, Sendable {
     /// computes the centre and zoom from its own viewport. Used for route preview.
     case fit(MapCoordinateBounds, padding: Double)
 
-    /// Navigation framing (M4.2): centre on `state`, tilt the camera by
-    /// `pitchDegrees`, and shift the focal point down by `focusBelowCentre` of
-    /// the viewport height so the vehicle sits below centre with more map ahead.
-    /// The provider renders `state.headingDegrees` as the camera bearing.
-    case navigation(MapCameraState, pitchDegrees: Double, focusBelowCentre: Double)
+    /// Navigation framing (M4.2, tuned M4.4): centre the map on `state`, tilt the
+    /// camera by `pitchDegrees`, and place the vehicle indicator at
+    /// `vehicleVerticalAnchor` of the viewport height measured from the top
+    /// (0.5 = dead centre, > 0.5 = below centre). The provider converts the
+    /// anchor into its own viewport padding. `state.headingDegrees` is the
+    /// camera bearing.
+    case navigation(MapCameraState, pitchDegrees: Double, vehicleVerticalAnchor: Double)
 }

@@ -143,7 +143,7 @@ struct MapViewModelContentTests {
         #expect(vm.content.camera == .navigation(
             vm.camera,
             pitchDegrees: MapViewModel.navigationPitchDegrees,
-            focusBelowCentre: MapViewModel.navigationFocusBelowCentre
+            vehicleVerticalAnchor: MapViewModel.navigationVehicleAnchor
         ))
     }
 

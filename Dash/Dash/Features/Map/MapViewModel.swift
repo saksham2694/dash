@@ -25,6 +25,11 @@
 //  only — the maneuver card, the progress engine, and all guidance logic live
 //  outside this type.
 //
+//  M4.4 polish: while `.navigating`, the drawn route line is shortened to just
+//  the part still ahead of the vehicle (derived from `route.polyline` +
+//  `RouteGeometry`; the `Route` itself is never mutated), and the navigation
+//  camera anchors the vehicle a little below centre.
+//
 
 import Combine
 import DashShared
@@ -40,11 +45,12 @@ final class MapViewModel: ObservableObject {
     /// updates the polyline in place when the route is recomputed.
     static let routePolylineID = "route"
 
-    /// `.navigating` camera framing (M4.2). Not turn-by-turn — just the camera
-    /// shape: a moderate tilt, and the vehicle pushed this fraction of the
-    /// viewport below centre so more of the road ahead is visible.
+    /// `.navigating` camera framing: a moderate tilt, with the vehicle indicator
+    /// anchored a little below the vertical centre (M4.4 — `0.5` is dead centre)
+    /// so more of the road ahead shows while staying well clear of the bottom
+    /// route-info panel.
     static let navigationPitchDegrees: Double = 55
-    static let navigationFocusBelowCentre: Double = 0.28
+    static let navigationVehicleAnchor: Double = 0.6
 
     /// Dynamic navigation zoom (M4.3). The camera sits at `navigationBaseZoom`
     /// while cruising between maneuvers and tightens toward
@@ -126,6 +132,9 @@ final class MapViewModel: ObservableObject {
         if followsVehicle, mode != .destinationPreview {
             content.camera = followCameraPlan()
         }
+        if mode == .navigating {
+            refreshRoutePolyline() // shorten the line to the road still ahead (M4.4)
+        }
     }
 
     /// Switch what the map is for. Any deliberate mode change re-arms
@@ -138,6 +147,7 @@ final class MapViewModel: ObservableObject {
             navigationProgress = nil
         }
         content.camera = cameraPlan()
+        refreshRoutePolyline() // full route in preview/cruising, remaining while navigating (M4.4)
     }
 
     /// Enter turn-by-turn navigation from the route preview (M4.3). Requires a
@@ -191,7 +201,7 @@ final class MapViewModel: ObservableObject {
         // Any existing route belongs to the previous destination — drop it until
         // the routing layer computes a new one via `setRoute(_:)`.
         self.route = nil
-        content.polylines = []
+        refreshRoutePolyline() // clears the line (route is now nil)
 
         if let destination {
             content.markers = [
@@ -211,25 +221,35 @@ final class MapViewModel: ObservableObject {
 
     /// Show (or clear) the computed route geometry (M3).
     ///
-    /// Draws the route as a single `MapPolyline`, and — **only while previewing a
-    /// destination** — re-frames the `.fit` camera so the vehicle, destination
-    /// and whole route are visible. That is a one-shot re-frame on route
-    /// load/clear: a later fix still does not move the camera (`update(with:)`),
-    /// so this is not navigation camera behaviour.
+    /// Draws the route as a single `MapPolyline` — the whole route while
+    /// previewing / cruising, only the part still ahead of the vehicle while
+    /// `.navigating` (M4.4). While previewing a destination it also re-frames the
+    /// `.fit` camera once so the vehicle, destination and whole route are
+    /// visible (a later fix still does not move that camera).
     func setRoute(_ route: Route?) {
         self.route = route
-
-        if let route {
-            content.polylines = [
-                MapPolyline(id: Self.routePolylineID, coordinates: route.polyline)
-            ]
-        } else {
-            content.polylines = []
-        }
+        refreshRoutePolyline()
 
         if mode == .destinationPreview {
             content.camera = cameraPlan()
         }
+    }
+
+    /// Rebuild `content.polylines` from `route`. During `.navigating` the line is
+    /// clipped to `RouteGeometry.remainingPolyline` (the road still ahead of the
+    /// vehicle); otherwise it is the whole route. Derived only — `route` is never
+    /// mutated, and an empty result (arrived / no route) leaves no stale line.
+    private func refreshRoutePolyline() {
+        guard let route, route.polyline.count >= 2 else {
+            content.polylines = []
+            return
+        }
+        let coordinates = mode == .navigating
+            ? RouteGeometry.remainingPolyline(of: route.polyline, from: content.vehicle.coordinate)
+            : route.polyline
+        content.polylines = coordinates.count >= 2
+            ? [MapPolyline(id: Self.routePolylineID, coordinates: coordinates)]
+            : []
     }
 
     /// Interaction coming back from the rendered map. `tapped*` cases are still
@@ -277,7 +297,7 @@ final class MapViewModel: ObservableObject {
             return .navigation(
                 navigationCameraState(),
                 pitchDegrees: Self.navigationPitchDegrees,
-                focusBelowCentre: Self.navigationFocusBelowCentre
+                vehicleVerticalAnchor: Self.navigationVehicleAnchor
             )
         case .cruising, .destinationPreview:
             return .follow(camera)

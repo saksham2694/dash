@@ -14,6 +14,9 @@
 //  Scope (M4.3): guidance display + progress only. No rerouting, no off-route
 //  detection, no alternative routes, no voice — see the milestone notes.
 //
+//  M4.4 adds `routeInfo(now:)` — the remaining distance / time / ETA figures for
+//  the live info panel, derived from the existing `Route` + `NavigationProgress`.
+//
 
 import Combine
 import Foundation
@@ -99,5 +102,14 @@ final class NavigationViewModel: ObservableObject {
                 isArrival: step.maneuver == .arrive
             )
         }
+    }
+
+    /// Remaining distance / time / ETA for the live info panel (M4.4), or `nil`
+    /// when there is nothing to show (not navigating, or arrived — the maneuver
+    /// card covers arrival). ETA is computed from `now` so callers pass a fresh
+    /// clock each render.
+    func routeInfo(now: Date = Date()) -> RouteInfo? {
+        guard let route, case .navigating(let progress) = state else { return nil }
+        return .remaining(route: route, progress: progress, now: now)
     }
 }
