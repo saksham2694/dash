@@ -10,12 +10,11 @@
 //  full-screen map view.
 //
 //  Scope so far: the shell/feature seam, the widget dashboard grid, real Map
-//  dashboard components (M5.2.x), and — M5.3.0 — tapping a widget opens its
-//  feature full-screen via `ShellStore.openApp` (wired through
-//  `DashboardSpaceView.onOpenFeature`, mirroring the Home launcher's `onOpen`).
-//  `closeApp()` returns to the exact Home / Dashboard page it was opened from.
-//  Feature runtime state stays app-scoped (M5.1). The Home launcher is still a
-//  simple placeholder.
+//  dashboard components (M5.2.x), and the paged Home launcher (M5.3.0). Both
+//  spaces forward a tapped tile's `featureID` through an `onOpenFeature`
+//  callback → `ShellStore.openApp`; `closeApp()` returns to the exact Home /
+//  Dashboard page it was opened from. Feature runtime state stays app-scoped
+//  (M5.1).
 //
 
 import SwiftUI
@@ -25,11 +24,19 @@ struct DashboardShell: View {
     @EnvironmentObject private var connection: ConnectionCoordinator
     @EnvironmentObject private var registry: FeatureRegistry
     @EnvironmentObject private var layoutStore: DashboardLayoutStore
+    @EnvironmentObject private var homeLayout: HomeLayoutStore
 
     @StateObject private var shell = ShellStore()
 
     /// The one grid the dashboard lays out on. Swappable in a single place.
     private let grid = DashboardGrid.standard
+
+    /// Presentation-only Home tiles for apps not built yet (not registered
+    /// features, not persisted). One place to drop them until each ships.
+    private static let comingSoonApps: [HomeComingSoonApp] = [
+        .init(title: "Music", symbolName: "music.note"),
+        .init(title: "Speedometer", symbolName: "gauge.open.with.lines.needle.33percent"),
+    ]
 
     var body: some View {
         HStack(spacing: 0) {
@@ -57,10 +64,14 @@ struct DashboardShell: View {
     @ViewBuilder
     private var content: some View {
         switch shell.surface {
-        case .home:
-            HomePlaceholderView(
-                manifests: registry.manifests,
-                onOpen: { shell.openApp($0) }
+        case .home(let pageIndex):
+            HomeSpaceView(
+                layoutStore: homeLayout,
+                registry: registry,
+                requestedPage: pageIndex,
+                onSelectPage: { shell.goToPage($0) },
+                onOpenFeature: { shell.openApp($0) },
+                comingSoon: Self.comingSoonApps
             )
         case .dashboard(let pageIndex):
             DashboardSpaceView(

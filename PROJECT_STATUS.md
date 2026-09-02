@@ -2773,7 +2773,24 @@ Status: Implemented.
 - Full-screen path is unchanged: `FeatureRegistry.feature(id).makeFullScreenView()`, same as opening from the sidebar/Home; no Maps special-casing; app-scoped `MapFeature` state (M5.1) reused.
 - Live Map widget stays non-interactive to map gestures (`GMSMapView` keeps `allowsHitTesting(false)`); the tile button handles the tap, no nested-gesture conflict. Minimal press-dim feedback, no elaborate animation.
 - `MapFeature` / `MapFullScreenView` internals untouched.
-- DashTests: 367/367 passed. Build: succeeded with no new warnings.
+- Full test suite: 370/370 passed (367 DashTests + 3 DashUITests). Build: succeeded with no new warnings.
+- No commit was made by Claude.
+
+Next: M5.4.0 — Speedometer feature (a second real `DashFeature`; sidebar + Home + dashboard widget presentations).
+
+## M5.3.0 — Paged Home Launcher
+
+Status: Implemented.
+
+- Replaced the `HomePlaceholderView` grid with a real paged Home launcher (`HomeSpaceView`).
+- New `HomeLayout` model: `HomeLayout` → `HomePage[]` → `HomeAppPlacement { id: UUID, featureID }`. SDK-neutral, `Codable` / `Equatable` / `Sendable`, no SwiftUI, separate from `DashboardLayout`. `pageCount` / `page(at:)` / `clampedPageIndex(_:)` / `allApps`.
+- New `HomeLayoutStore` (`@MainActor`, `UserDefaults`): `{ version, layout }` JSON envelope under `shell.homeLayout.v1`, schema version 1; falls back to the seed on missing / undecodable / wrong-version / duplicate-placement-id data; stable placement UUIDs survive round trips.
+- Default Home layout is derived from `FeatureRegistry` (`HomeLayout.starter(featureIDs: registry.manifests.map(\.id))`, wired in `DashApp`) — no feature-specific logic in the Home view. Maps appears as a real tile; Music / Speedometer are presentation-only "coming soon" tiles supplied by `DashboardShell` (not registered, not persisted).
+- Tapping a tile forwards `HomeAppPlacement.featureID` through `onOpenFeature` → `ShellStore.openApp` → `FeatureRegistry.feature(id).makeFullScreenView()` — the same boundary and mechanism `DashboardSpaceView` uses; no Maps special-casing.
+- Closing a feature opened from Home page N returns to Home page N (existing `ShellStore.openApp` / `closeApp` / `returnSurface` semantics, unchanged). Page moves are model-level (`ShellSurface.home(page:)` + `ShellStore.goToPage` + `HomeLayout.clampedPageIndex`); prev/next controls only, no swipe gesture yet.
+- `HomeSpaceView` stays feature-agnostic: knows only `HomeAppPlacement`, `FeatureID`, `FeatureManifest`, and callbacks — never `ShellStore` or a feature view model.
+- Sidebar, `ShellStore`, `DashboardSpaceView`, `MapFeature`, `MapFullScreenView` untouched.
+- DashTests: 388/388 passed. Build: succeeded with no new warnings.
 - No commit was made by Claude.
 
 Next: M5.4.0 — Speedometer feature (a second real `DashFeature`; sidebar + Home + dashboard widget presentations).
