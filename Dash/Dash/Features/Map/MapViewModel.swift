@@ -30,6 +30,13 @@
 //  `RouteGeometry`; the `Route` itself is never mutated), and the navigation
 //  camera anchors the vehicle a little below centre.
 //
+//  M4.5: `routeOptions` holds the set of route choices (recommended +
+//  alternatives). `route` is whichever one is *active* — emphasised on the map,
+//  framed by the preview camera, handed to `NavigationViewModel`. In preview,
+//  `route == routeOptions.selected`. During navigation a refreshed set can sit
+//  in `routeOptions` (drawn as secondary alternatives) while `route` stays the
+//  route being driven, until the driver adopts one via `selectRouteOption`.
+//
 
 import Combine
 import DashShared
@@ -90,10 +97,16 @@ final class MapViewModel: ObservableObject {
     /// remains the source of truth; this is set only via `setDestination(_:)`.
     private(set) var destination: Destination?
 
-    /// The active route, mirrored here so the `.destinationPreview` camera can be
-    /// framed around the whole route. The routing layer remains the source of
-    /// truth; this is set only via `setRoute(_:)`.
-    private(set) var route: Route?
+    /// The active route — emphasised on the map, framed by the preview camera,
+    /// used by Start / the info panel. The routing layer remains the source of
+    /// truth; set via `setRoute(_:)` / `setRouteOptions(_:)` / `selectRouteOption(_:)`.
+    @Published private(set) var route: Route?
+
+    /// The set of route choices on offer + which is selected (M4.5). In preview
+    /// this is the fetched set with `selected == route`. During navigation it is
+    /// a *refreshed* set (drawn secondary) until the driver adopts one. `nil`
+    /// when there is a single route or none.
+    @Published private(set) var routeOptions: RouteOptions?
 
     /// Live turn-by-turn progress while `.navigating` (M4.3). Owned by
     /// `NavigationViewModel`; mirrored here only so the navigation camera can
@@ -133,7 +146,7 @@ final class MapViewModel: ObservableObject {
             content.camera = followCameraPlan()
         }
         if mode == .navigating {
-            refreshRoutePolyline() // shorten the line to the road still ahead (M4.4)
+            rebuildRoutePolylines() // shorten the active line to the road still ahead (M4.4)
         }
     }
 
@@ -147,16 +160,17 @@ final class MapViewModel: ObservableObject {
             navigationProgress = nil
         }
         content.camera = cameraPlan()
-        refreshRoutePolyline() // full route in preview/cruising, remaining while navigating (M4.4)
+        rebuildRoutePolylines() // full route in preview/cruising, remaining while navigating (M4.4)
     }
 
     /// Enter turn-by-turn navigation from the route preview (M4.3). Requires a
     /// loaded route and a known current location (`canStartNavigation`); a no-op
-    /// otherwise. Keeps the existing route, resets to the navigation base zoom,
-    /// and switches to the `.navigating` camera.
+    /// otherwise. Navigates the currently selected route; drops the preview
+    /// alternatives (a manual Refresh brings alternatives back — M4.5).
     func startNavigation() {
         guard canStartNavigation else { return }
         navigationProgress = nil
+        routeOptions = nil // only the active route while navigating, until a refresh
         camera.zoom = Self.navigationBaseZoom
         setMode(.navigating)
     }
@@ -198,10 +212,11 @@ final class MapViewModel: ObservableObject {
         followsVehicle = true // a deliberate transition re-arms follow (M4.2)
         navigationProgress = nil // any nav session belonged to the old destination (M4.3)
 
-        // Any existing route belongs to the previous destination — drop it until
-        // the routing layer computes a new one via `setRoute(_:)`.
+        // Any existing route / options belong to the previous destination — drop
+        // them until the routing layer computes new ones.
         self.route = nil
-        refreshRoutePolyline() // clears the line (route is now nil)
+        self.routeOptions = nil
+        rebuildRoutePolylines() // clears the lines (route is now nil)
 
         if let destination {
             content.markers = [
@@ -219,37 +234,87 @@ final class MapViewModel: ObservableObject {
         content.camera = cameraPlan()
     }
 
-    /// Show (or clear) the computed route geometry (M3).
-    ///
-    /// Draws the route as a single `MapPolyline` — the whole route while
-    /// previewing / cruising, only the part still ahead of the vehicle while
-    /// `.navigating` (M4.4). While previewing a destination it also re-frames the
-    /// `.fit` camera once so the vehicle, destination and whole route are
-    /// visible (a later fix still does not move that camera).
+    /// Show (or clear) a single computed route with no alternatives (M3
+    /// convenience). Equivalent to `setRouteOptions` with a one-element set.
     func setRoute(_ route: Route?) {
-        self.route = route
-        refreshRoutePolyline()
-
-        if mode == .destinationPreview {
-            content.camera = cameraPlan()
-        }
+        setRouteOptions(route.flatMap { RouteOptions([$0]) })
     }
 
-    /// Rebuild `content.polylines` from `route`. During `.navigating` the line is
-    /// clipped to `RouteGeometry.remainingPolyline` (the road still ahead of the
-    /// vehicle); otherwise it is the whole route. Derived only — `route` is never
-    /// mutated, and an empty result (arrived / no route) leaves no stale line.
-    private func refreshRoutePolyline() {
-        guard let route, route.polyline.count >= 2 else {
-            content.polylines = []
-            return
+    /// Show a set of route options (M4.5).
+    ///
+    /// - `.destinationPreview` — the selected option becomes the active `route`
+    ///   and the camera re-fits it (a one-shot fit; a later fix does not move
+    ///   it).
+    /// - `.navigating` — a *refreshed* set: `route` (the route being driven) is
+    ///   left untouched; the options are drawn as secondary alternatives until
+    ///   the driver picks one via `selectRouteOption`.
+    /// - `.cruising` / `nil` — clears the route.
+    func setRouteOptions(_ options: RouteOptions?) {
+        routeOptions = options
+
+        switch mode {
+        case .destinationPreview:
+            route = options?.selected
+            content.camera = cameraPlan()
+        case .cruising:
+            route = options?.selected
+        case .navigating:
+            break // keep the active nav route; the options draw as alternatives
         }
-        let coordinates = mode == .navigating
-            ? RouteGeometry.remainingPolyline(of: route.polyline, from: content.vehicle.coordinate)
-            : route.polyline
-        content.polylines = coordinates.count >= 2
-            ? [MapPolyline(id: Self.routePolylineID, coordinates: coordinates)]
-            : []
+
+        rebuildRoutePolylines()
+    }
+
+    /// Choose a different route among `routeOptions`.
+    ///
+    /// - `.destinationPreview` — it becomes the active `route`; the camera
+    ///   re-fits it. Start Navigation will then use it. **Does not start
+    ///   navigation.**
+    /// - `.navigating` — the driver adopted a refreshed route: it becomes the
+    ///   active `route`, navigation progress is reset, and the camera snaps to it
+    ///   only if follow is on. The caller re-seeds `NavigationViewModel`.
+    func selectRouteOption(_ id: String) {
+        guard let options = routeOptions, options.routes.contains(where: { $0.id == id }) else { return }
+        routeOptions = options.selecting(id)
+        route = routeOptions?.selected
+
+        switch mode {
+        case .destinationPreview:
+            content.camera = cameraPlan()
+        case .navigating:
+            navigationProgress = nil
+            if followsVehicle { content.camera = followCameraPlan() }
+        case .cruising:
+            break
+        }
+
+        rebuildRoutePolylines()
+    }
+
+    /// Rebuild `content.polylines`: the active `route` drawn `.selected` (clipped
+    /// to the road ahead while `.navigating`), plus every other route in
+    /// `routeOptions` drawn `.alternative`. Derived only — no `Route` is mutated,
+    /// stale ids drop out, and an empty active route leaves no stale line.
+    private func rebuildRoutePolylines() {
+        var lines: [MapPolyline] = []
+        let activeID = route?.id
+
+        if let options = routeOptions {
+            for candidate in options.routes where candidate.id != activeID && candidate.polyline.count >= 2 {
+                lines.append(MapPolyline(id: candidate.id, coordinates: candidate.polyline, role: .alternative))
+            }
+        }
+
+        if let route, route.polyline.count >= 2 {
+            let coordinates = mode == .navigating
+                ? RouteGeometry.remainingPolyline(of: route.polyline, from: content.vehicle.coordinate)
+                : route.polyline
+            if coordinates.count >= 2 {
+                lines.append(MapPolyline(id: route.id, coordinates: coordinates, role: .selected))
+            }
+        }
+
+        content.polylines = lines
     }
 
     /// Interaction coming back from the rendered map. `tapped*` cases are still
@@ -262,6 +327,11 @@ final class MapViewModel: ObservableObject {
         switch event {
         case .tappedMap, .tappedPOI, .tappedMarker:
             break
+        case .tappedRoute(let id):
+            // Tapping an alternative on the map selects it — preview only, so a
+            // stray tap while driving can never switch the active route (M4.5).
+            guard mode == .destinationPreview else { return }
+            selectRouteOption(id)
         case .cameraIdle(let position, let byUserGesture):
             guard byUserGesture, mode != .destinationPreview else { return }
             followsVehicle = false

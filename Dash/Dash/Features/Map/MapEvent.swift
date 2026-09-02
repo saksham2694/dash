@@ -40,6 +40,10 @@ nonisolated enum MapEvent: Equatable, Sendable {
     /// The user tapped one of our `MapMarker`s (by `id`).
     case tappedMarker(id: String)
 
+    /// The user tapped one of our route `MapPolyline`s (by `id`) — used to pick
+    /// an alternative route in the destination preview (M4.5).
+    case tappedRoute(id: String)
+
     /// The camera stopped moving. `byUserGesture` is `true` whenever a user
     /// pan / zoom / rotate gesture moved the camera — however small (M4.2);
     /// programmatic camera moves report `false`. `MapViewModel` uses it to drop

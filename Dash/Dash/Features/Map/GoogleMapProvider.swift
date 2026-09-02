@@ -89,7 +89,7 @@ private struct GoogleMapContainer: UIViewRepresentable {
         marker.isFlat = true
         marker.groundAnchor = CGPoint(x: 0.5, y: 0.5)
         marker.isTappable = false
-        marker.zIndex = 1 // sit on top of the route polyline
+        marker.zIndex = 10 // above every route polyline + the destination pin
         marker.map = mapView
         context.coordinator.vehicleMarker = marker
 
@@ -198,19 +198,37 @@ private struct GoogleMapContainer: UIViewRepresentable {
                 for coordinate in line.coordinates {
                     path.add(Self.coordinate(coordinate))
                 }
+                let polyline: GMSPolyline
                 if let existing = routeLines[line.id] {
-                    existing.path = path
+                    polyline = existing
                 } else {
-                    let polyline = GMSPolyline(path: path)
-                    polyline.strokeWidth = 6
-                    polyline.strokeColor = .systemBlue
+                    polyline = GMSPolyline()
+                    polyline.isTappable = true // pick an alternative route (M4.5)
                     polyline.map = mapView
                     routeLines[line.id] = polyline
                 }
+                polyline.path = path
+                polyline.userData = line.id
+                Self.style(polyline, as: line.role)
             }
             for id in stale {
                 routeLines[id]?.map = nil
                 routeLines[id] = nil
+            }
+        }
+
+        /// Visual differentiation for the route polylines (M4.5) — the only
+        /// place stroke / width / z-order is decided.
+        private static func style(_ polyline: GMSPolyline, as role: MapPolylineRole) {
+            switch role {
+            case .selected:
+                polyline.strokeColor = .systemBlue
+                polyline.strokeWidth = 6
+                polyline.zIndex = 2
+            case .alternative:
+                polyline.strokeColor = UIColor.systemGray.withAlphaComponent(0.85)
+                polyline.strokeWidth = 4
+                polyline.zIndex = 1
             }
         }
 
@@ -226,6 +244,7 @@ private struct GoogleMapContainer: UIViewRepresentable {
                     pin.position = Self.coordinate(marker.coordinate)
                     pin.title = marker.title
                     pin.userData = marker.id
+                    pin.zIndex = 3 // above the route polylines, below the vehicle
                     pin.map = mapView
                     pins[marker.id] = pin
                 }
@@ -335,6 +354,11 @@ private struct GoogleMapContainer: UIViewRepresentable {
             guard let id = marker.userData as? String else { return false }
             onEvent(.tappedMarker(id: id))
             return false // keep default behaviour (centre + info window)
+        }
+
+        func mapView(_ mapView: GMSMapView, didTap overlay: GMSOverlay) {
+            guard let id = overlay.userData as? String else { return }
+            onEvent(.tappedRoute(id: id))
         }
 
         private static func coordinate(_ c: MapCoordinate) -> CLLocationCoordinate2D {

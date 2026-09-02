@@ -17,6 +17,10 @@
 //  M4.4 adds `routeInfo(now:)` — the remaining distance / time / ETA figures for
 //  the live info panel, derived from the existing `Route` + `NavigationProgress`.
 //
+//  M4.5 adds `reroute(to:from:)` — swap to a route the driver picked after a
+//  manual Refresh without tearing down the session (progress re-seeds against
+//  the new route from the current position).
+//
 
 import Combine
 import Foundation
@@ -74,6 +78,17 @@ final class NavigationViewModel: ObservableObject {
     func stop() {
         route = nil
         state = .inactive
+    }
+
+    /// Swap the route being navigated for one the driver picked after a manual
+    /// Refresh (M4.5). Keeps the session active; re-seeds progress from `origin`
+    /// against the new route. No-op when not navigating, the route has no steps,
+    /// or `origin` is nil.
+    func reroute(to route: Route, from origin: MapCoordinate?) {
+        guard isActive, !route.steps.isEmpty, let origin else { return }
+        self.route = route
+        let progress = NavigationProgressCalculator.initial(for: route, at: origin)
+        state = progress.isArrived ? .arrived : .navigating(progress)
     }
 
     /// Feed in the latest vehicle coordinate. No-op unless actively navigating.

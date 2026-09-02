@@ -17,8 +17,9 @@
 //  `X-Ios-Bundle-Identifier` header so the same restricted key works here too.
 //  A 403 from the endpoint surfaces as `RouteError.unavailable`.
 //
-//  Cost (spec §5): "Compute Routes" is billed per request. Callers must request
-//  a route once per trip — never on a timer.
+//  Cost (spec §5): "Compute Routes" is billed per request. Callers request a
+//  route once per trip, plus at most one manual "Refresh Route" (M4.5) — never
+//  on a timer. `computeAlternativeRoutes` does not change the pricing tier.
 //
 
 import Foundation
@@ -58,7 +59,7 @@ final class GoogleRouteService: RouteService {
         self.fetch = fetch
     }
 
-    func route(from origin: MapCoordinate, to destination: MapCoordinate) async throws -> Route {
+    func routes(from origin: MapCoordinate, to destination: MapCoordinate) async throws -> [Route] {
         guard let key = apiKey() else { throw RouteError.unavailable }
 
         let request = Self.makeRequest(from: origin, to: destination, apiKey: key)
@@ -76,7 +77,7 @@ final class GoogleRouteService: RouteService {
             throw RouteError.unavailable
         }
 
-        return try Self.parseRoute(from: data)
+        return try Self.parseRoutes(from: data)
     }
 
     // MARK: - Request construction (pure; internal for testing)
@@ -101,7 +102,10 @@ final class GoogleRouteService: RouteService {
             "origin": ["location": ["latLng": ["latitude": origin.latitude, "longitude": origin.longitude]]],
             "destination": ["location": ["latLng": ["latitude": destination.latitude, "longitude": destination.longitude]]],
             "travelMode": "DRIVE",
+            // Deliberately traffic-*unaware* (spec §5 cost) — alternatives are a
+            // separate flag and do not change the pricing tier.
             "routingPreference": "TRAFFIC_UNAWARE",
+            "computeAlternativeRoutes": true,
             "polylineEncoding": "ENCODED_POLYLINE",
         ]
         request.httpBody = (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
@@ -110,9 +114,11 @@ final class GoogleRouteService: RouteService {
 
     // MARK: - Response mapping (pure; internal for testing)
 
-    /// Translate a `computeRoutes` response body into a `Route`. Throws
-    /// `RouteError.noRoute` when the response carries no usable route.
-    nonisolated static func parseRoute(from data: Data) throws -> Route {
+    /// Translate a `computeRoutes` response body into one or more `Route`s
+    /// (M4.5) — response order preserved, `[0]` recommended, each keyed
+    /// `"route-<index>"`. Routes with no usable geometry are dropped; throws
+    /// `RouteError.noRoute` when none survive or the body can't be decoded.
+    nonisolated static func parseRoutes(from data: Data) throws -> [Route] {
         let decoded: ComputeRoutesResponse
         do {
             decoded = try JSONDecoder().decode(ComputeRoutesResponse.self, from: data)
@@ -120,22 +126,23 @@ final class GoogleRouteService: RouteService {
             throw RouteError.noRoute
         }
 
-        guard
-            let first = decoded.routes?.first,
-            let encoded = first.polyline?.encodedPolyline
-        else {
-            throw RouteError.noRoute
+        guard let dtos = decoded.routes, !dtos.isEmpty else { throw RouteError.noRoute }
+
+        let routes: [Route] = dtos.enumerated().compactMap { index, dto in
+            guard let encoded = dto.polyline?.encodedPolyline else { return nil }
+            let coordinates = GooglePolyline.decode(encoded)
+            guard coordinates.count >= 2 else { return nil }
+            return Route(
+                id: "route-\(index)",
+                polyline: coordinates,
+                distanceMeters: dto.distanceMeters ?? 0,
+                duration: Self.duration(from: dto.duration) ?? .zero,
+                steps: Self.steps(from: dto.legs)
+            )
         }
 
-        let coordinates = GooglePolyline.decode(encoded)
-        guard coordinates.count >= 2 else { throw RouteError.noRoute }
-
-        return Route(
-            polyline: coordinates,
-            distanceMeters: first.distanceMeters ?? 0,
-            duration: Self.duration(from: first.duration) ?? .zero,
-            steps: Self.steps(from: first.legs)
-        )
+        guard !routes.isEmpty else { throw RouteError.noRoute }
+        return routes
     }
 
     /// Translate the Routes API's `legs[].steps[]` into SDK-neutral `RouteStep`s

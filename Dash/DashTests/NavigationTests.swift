@@ -358,6 +358,60 @@ struct NavigationViewModelTests {
         vm.update(with: MapCoordinate(latitude: 1, longitude: 1))
         #expect(vm.state == .inactive)
     }
+
+    // MARK: reroute (M4.5)
+
+    @Test("reroute swaps the route and re-seeds progress without leaving navigation")
+    func reroutes() {
+        let old = route()
+        let vm = NavigationViewModel()
+        vm.start(route: old, from: old.steps[0].maneuverPoint)
+        // advance a little so progress is non-initial
+        vm.update(with: lerp(old.steps[0].polyline[0], old.steps[0].polyline[1], 0.5))
+
+        // A different route to the same place.
+        let new = Route(
+            id: "route-1",
+            polyline: [old.steps[0].maneuverPoint, old.polyline.last!],
+            distanceMeters: 1_000, duration: .seconds(120),
+            steps: [
+                RouteStep(maneuver: .depart, instruction: "Head off", roadName: "New Rd",
+                          maneuverPoint: old.steps[0].maneuverPoint,
+                          polyline: [old.steps[0].maneuverPoint, old.polyline.last!],
+                          distanceMeters: 0),
+                RouteStep(maneuver: .arrive, instruction: "Arrive", roadName: nil,
+                          maneuverPoint: old.polyline.last!,
+                          polyline: [old.polyline.last!,
+                                     MapCoordinate(latitude: old.polyline.last!.latitude + 0.0003,
+                                                   longitude: old.polyline.last!.longitude)],
+                          distanceMeters: 0),
+            ]
+        )
+
+        vm.reroute(to: new, from: old.steps[0].maneuverPoint)
+
+        #expect(vm.isActive)                    // session kept
+        #expect(vm.route?.id == "route-1")
+        // progress re-seeded from the start of the new route
+        #expect(vm.progress?.traveledMeters == 0)
+        #expect(vm.progress?.stepIndex == 1)    // approaching the new route's arrive step
+    }
+
+    @Test("reroute is a no-op when not navigating")
+    func rerouteInactive() {
+        let vm = NavigationViewModel()
+        vm.reroute(to: route(), from: MapCoordinate(latitude: 0, longitude: 0))
+        #expect(vm.state == .inactive)
+    }
+
+    @Test("reroute is a no-op without an origin")
+    func rerouteNeedsOrigin() {
+        let r = route()
+        let vm = NavigationViewModel()
+        vm.start(route: r, from: r.steps[0].maneuverPoint)
+        vm.reroute(to: route(), from: nil)
+        #expect(vm.route?.id == "route") // unchanged
+    }
 }
 
 // MARK: - Maneuver card model

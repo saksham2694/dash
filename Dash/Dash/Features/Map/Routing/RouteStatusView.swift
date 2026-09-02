@@ -75,7 +75,7 @@ struct RouteStatusView: View {
 #Preview("Route status") {
     let vm = RouteViewModel(service: PreviewRouteService())
     // No origin → lands in `.noCurrentLocation`, so the pill renders.
-    vm.requestRoute(
+    vm.requestRoutes(
         to: Destination(placeID: "x", name: "X", address: nil,
                         coordinate: MapCoordinate(latitude: 1, longitude: 1)),
         from: nil
@@ -87,8 +87,10 @@ struct RouteStatusView: View {
 }
 
 private struct PreviewRouteService: RouteService {
-    func route(from origin: MapCoordinate, to destination: MapCoordinate) async throws -> Route {
-        Route(polyline: [], distanceMeters: 0, duration: .zero)
+    func routes(from origin: MapCoordinate, to destination: MapCoordinate) async throws -> [Route] {
+        [Route(polyline: [MapCoordinate(latitude: 0, longitude: 0),
+                          MapCoordinate(latitude: 1, longitude: 1)],
+               distanceMeters: 0, duration: .zero)]
     }
 }
 #endif

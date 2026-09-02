@@ -20,6 +20,11 @@ struct ManeuverCardView: View {
     /// Leave navigation and return to cruising.
     var onEnd: () -> Void
 
+    /// Manually recalculate routes from the current location (M4.5). Hidden when
+    /// `nil`. Shows a spinner while `isRefreshing`.
+    var onRefresh: (() -> Void)?
+    var isRefreshing: Bool = false
+
     var body: some View {
         HStack(spacing: 16) {
             Image(systemName: card.iconSystemName)
@@ -47,15 +52,36 @@ struct ManeuverCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button(action: onEnd) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color(uiColor: .label))
-                    .frame(width: 36, height: 36)
-                    .background(Color.primary.opacity(0.1), in: Circle())
+            HStack(spacing: 8) {
+                if let onRefresh {
+                    Button(action: onRefresh) {
+                        Group {
+                            if isRefreshing {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 15, weight: .bold))
+                            }
+                        }
+                        .foregroundStyle(Color(uiColor: .label))
+                        .frame(width: 36, height: 36)
+                        .background(Color.primary.opacity(0.1), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isRefreshing)
+                    .accessibilityLabel("Refresh route")
+                }
+
+                Button(action: onEnd) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Color(uiColor: .label))
+                        .frame(width: 36, height: 36)
+                        .background(Color.primary.opacity(0.1), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("End navigation")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("End navigation")
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
