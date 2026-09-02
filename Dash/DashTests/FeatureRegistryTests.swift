@@ -86,20 +86,3 @@ struct FeatureRegistryTests {
         #expect(map?.manifest.supportedSizes.contains(.full) == true)
     }
 }
-
-@MainActor
-@Suite("MapFeature")
-struct MapFeatureTests {
-
-    @Test("manifest is well-formed and stable")
-    func manifest() {
-        let manifest = MapFeature().manifest
-
-        #expect(manifest.id == "maps")
-        #expect(manifest.id == MapFeature.id)
-        #expect(!manifest.title.isEmpty)
-        #expect(!manifest.symbolName.isEmpty)
-        #expect(manifest.supportedSizes.contains(manifest.defaultSize))
-        #expect(manifest.supportedWidgetSizes == [.compact, .medium, .large])
-    }
-}

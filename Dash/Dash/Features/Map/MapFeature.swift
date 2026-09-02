@@ -2,14 +2,23 @@
 //  MapFeature.swift
 //  Dash
 //
-//  The Map feature's adapter to the shell (M5.0). This is the *only* bridge
-//  between `Shell/` and the existing Map code: it wraps `ContentView` (the Map
-//  composition root) unchanged.
+//  The Map feature's adapter to the shell, and — as of M5.1 — the **app-scoped
+//  owner of the Map runtime state**.
 //
-//  Deliberately thin. Hoisting `MapViewModel` / `RouteViewModel` /
-//  `NavigationViewModel` / … out of `ContentView` into this type — so a
-//  navigation session survives leaving and returning to the Map — is M5.1, not
-//  this milestone.
+//  Before M5.1 the five Map view models were `@StateObject`s inside
+//  `ContentView`, so they were torn down and rebuilt every time the Map screen
+//  left the view tree (e.g. Maps → Home → Maps), losing any active route /
+//  navigation session. Now they live here, for the life of the app:
+//  `makeFullScreenView()` hands `MapFullScreenView` references to these
+//  instances, it does not create new ones.
+//
+//  This is still the *only* bridge between `Shell/` and Map internals. The shell
+//  never sees `MapViewModel` / `RouteViewModel` / `NavigationViewModel` / … —
+//  only `DashFeature`.
+//
+//  Not changed in M5.1: the routing / navigation algorithms, the wiring between
+//  the view models (that still lives in `MapFullScreenView`, driven by
+//  `LocationStore` while the Map screen is on-screen), and the Map UX.
 //
 
 import SwiftUI
@@ -28,9 +37,61 @@ final class MapFeature: DashFeature {
         defaultSize: .large
     )
 
-    /// The existing full-screen Map experience, untouched.
+    // MARK: - App-scoped Map runtime state
+    //
+    // Owned here so it survives the Map screen leaving and re-entering the view
+    // tree. `MapFullScreenView` observes these; it never creates its own.
+
+    /// Drives the active map provider: camera, overlays, mode, follow state,
+    /// the selected route / route options, live navigation progress.
+    let mapViewModel: MapViewModel
+
+    /// Source of truth for the chosen destination.
+    let destinationStore: DestinationStore
+
+    /// Catalog autocomplete + resolve-to-`Destination`.
+    let searchViewModel: PlaceSearchViewModel
+
+    /// Route computation + manual / automatic refresh state.
+    let routeViewModel: RouteViewModel
+
+    /// Turn-by-turn session: maneuver card, progress, ETA, off-route signal.
+    let navigationViewModel: NavigationViewModel
+
+    /// Injectable for tests; production uses the real, SDK-backed services.
+    init(
+        mapViewModel: MapViewModel? = nil,
+        destinationStore: DestinationStore? = nil,
+        searchViewModel: PlaceSearchViewModel? = nil,
+        routeViewModel: RouteViewModel? = nil,
+        navigationViewModel: NavigationViewModel? = nil
+    ) {
+        self.mapViewModel = mapViewModel ?? MapViewModel()
+        self.destinationStore = destinationStore ?? DestinationStore()
+        self.searchViewModel = searchViewModel ?? PlaceSearchViewModel(service: GooglePlaceSearchService())
+        self.routeViewModel = routeViewModel ?? RouteViewModel(service: GoogleRouteService())
+        self.navigationViewModel = navigationViewModel ?? NavigationViewModel()
+
+        // One-time wiring that `ContentView` used to do in `.task`. Both objects
+        // are feature-owned, so it belongs here and persists for the app's life.
+        // `[weak self]` breaks the feature → searchViewModel → closure → feature
+        // cycle.
+        self.searchViewModel.onDestinationChosen = { [weak self] destination in
+            self?.destinationStore.select(destination)
+        }
+    }
+
+    /// Built once. The shell can re-evaluate its `body` for unrelated reasons
+    /// (connection state churn, sidebar toggles); handing back the same view
+    /// value keeps the map from being rebuilt underneath an active session while
+    /// Maps stays on screen. Leaving Maps entirely still tears the map view down
+    /// and rebuilds it on return — but from the app-scoped state above, so the
+    /// route / navigation session is intact.
+    private lazy var fullScreenView = AnyView(MapFullScreenView(feature: self))
+
+    /// The full-screen Map experience, backed by the app-scoped state above.
     func makeFullScreenView() -> AnyView {
-        AnyView(ContentView())
+        fullScreenView
     }
 
     /// Dashboard widgets are M5.2 — every widget size shows a placeholder for

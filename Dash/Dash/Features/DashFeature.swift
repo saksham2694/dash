@@ -78,7 +78,9 @@ protocol DashFeature: AnyObject {
     var manifest: FeatureManifest { get }
 
     /// The full-screen experience for this feature — what `ShellSurface.app`
-    /// shows. For Map (M5.0) this is the existing `ContentView`, unchanged.
+    /// shows. The feature owns any runtime state this view needs (app-scoped),
+    /// so opening the feature again observes the same state rather than
+    /// rebuilding it.
     func makeFullScreenView() -> AnyView
 
     /// A size-appropriate widget view. `size` is a widget size

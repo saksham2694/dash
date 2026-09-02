@@ -612,7 +612,7 @@ struct NavigationViewModelOffRouteTests {
 @Suite("Automatic reroute adoption")
 struct AutomaticRerouteAdoptionTests {
 
-    /// The exact call sequence `ContentView.adoptAutomaticReroute` runs.
+    /// The exact call sequence `MapFullScreenView.adoptAutomaticReroute` runs.
     private func adopt(_ options: RouteOptions,
                        map: MapViewModel,
                        nav: NavigationViewModel,

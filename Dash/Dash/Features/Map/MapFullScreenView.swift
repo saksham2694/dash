@@ -1,31 +1,43 @@
 //
-//  ContentView.swift
+//  MapFullScreenView.swift
 //  Dash
 //
-//  Created by Saksham Sharma on 2026-08-31.
+//  The full-screen Map experience: the interactive map plus the search / route /
+//  navigation overlays. Presented by `MapFeature.makeFullScreenView()`.
 //
-//  For now this is the full-screen map plus the destination-search overlay, so
-//  the Map feature can be exercised end to end. The real CarPlay-style dashboard
-//  layout comes later and will embed `DashMapView` as one tile.
+//  Was `ContentView` until M5.1. The change: it no longer *owns* the Map view
+//  models. `MapFeature` owns them (app-scoped) and this view observes the
+//  instances it is handed, so leaving and re-entering the Map screen
+//  (Maps → Home → Maps) no longer resets an active route / navigation session.
 //
-//  This is the composition point for the Map feature: it owns the map view model,
-//  the search view model, the destination store, the routing view model, and the
-//  navigation view model, and wires them together. None of those know about each
-//  other.
+//  It still wires the view models together — none of them know about each other,
+//  and that composition stays here, driven by `LocationStore` while this screen
+//  is on-screen. The routing / navigation algorithms are unchanged.
 //
 
 import DashShared
 import SwiftUI
 
-struct ContentView: View {
+struct MapFullScreenView: View {
 
     @EnvironmentObject private var locationStore: LocationStore
 
-    @StateObject private var mapViewModel = MapViewModel()
-    @StateObject private var destinationStore = DestinationStore()
-    @StateObject private var searchViewModel = PlaceSearchViewModel(service: GooglePlaceSearchService())
-    @StateObject private var routeViewModel = RouteViewModel(service: GoogleRouteService())
-    @StateObject private var navigationViewModel = NavigationViewModel()
+    // Observed, not owned: these instances belong to `MapFeature` (app-scoped).
+    // Not `private` so a test can confirm the view observes the feature's
+    // instances rather than creating its own.
+    @ObservedObject var mapViewModel: MapViewModel
+    @ObservedObject var destinationStore: DestinationStore
+    @ObservedObject var searchViewModel: PlaceSearchViewModel
+    @ObservedObject var routeViewModel: RouteViewModel
+    @ObservedObject var navigationViewModel: NavigationViewModel
+
+    init(feature: MapFeature) {
+        _mapViewModel = ObservedObject(wrappedValue: feature.mapViewModel)
+        _destinationStore = ObservedObject(wrappedValue: feature.destinationStore)
+        _searchViewModel = ObservedObject(wrappedValue: feature.searchViewModel)
+        _routeViewModel = ObservedObject(wrappedValue: feature.routeViewModel)
+        _navigationViewModel = ObservedObject(wrappedValue: feature.navigationViewModel)
+    }
 
     /// Latest usable vehicle position, or `nil` before the first fix. Routing,
     /// navigation progress, and search bias all read this from `LocationStore` —
@@ -80,9 +92,6 @@ struct ContentView: View {
             .animation(.easeInOut(duration: 0.2), value: isNavigating)
             .animation(.easeInOut(duration: 0.2), value: mapViewModel.route)
             .animation(.easeInOut(duration: 0.2), value: routeViewModel.refresh)
-            .task {
-                searchViewModel.onDestinationChosen = { destinationStore.select($0) }
-            }
             .onChange(of: locationStore.latestPacket) { _, packet in
                 let coordinate = packet.map {
                     MapCoordinate(latitude: $0.latitude, longitude: $0.longitude)
@@ -322,6 +331,6 @@ struct ContentView: View {
 #Preview {
     let _ = GoogleMapsConfiguration.bootstrap()
     let _ = GooglePlacesConfiguration.bootstrap()
-    ContentView()
+    MapFullScreenView(feature: MapFeature())
         .environmentObject(LocationStore())
 }

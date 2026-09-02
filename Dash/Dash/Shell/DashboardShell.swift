@@ -7,12 +7,12 @@
 //  (spec §8) — feature views know nothing about it.
 //
 //  Shown by `RootView` whenever Dash is connected, in place of the old
-//  full-screen `ContentView`.
+//  full-screen map view.
 //
-//  M5.0 scope: the shell/feature seam only. The Home launcher is a simple
+//  Scope so far: the shell/feature seam. The Home launcher is a simple
 //  placeholder, the Dashboard space is a placeholder (the widget grid is
-//  M5.2), and the only feature that opens full-screen is Map (its existing
-//  `ContentView`, unchanged).
+//  M5.2), and the only feature that opens full-screen is Map — via
+//  `MapFeature.makeFullScreenView()`, whose runtime state is app-scoped (M5.1).
 //
 
 import SwiftUI
