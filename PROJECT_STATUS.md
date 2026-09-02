@@ -2741,3 +2741,23 @@ Git history on `main` (newest first):
   fallback) are covered by +24 unit tests
   (`DashboardLayoutTests` / `DashboardLayoutStoreTests`). Full suite **347/347**,
   build clean. Working tree — not committed.
+
+## M5.2.1 — Real Map Dashboard Components
+
+Status: Implemented and physically verified.
+
+- Added real compact, medium, and large Map dashboard components.
+- Compact shows maneuver guidance while navigating instead of a tiny map.
+- Medium/large render live map presentations with navigation information.
+- All dashboard Map components share the app-scoped MapFeature runtime state.
+- Added timestamp-deduplicated dashboard location/navigation observation.
+- Existing full-screen Maps behavior remains unchanged.
+- Physical test on the iPad passed; two concurrent dashboard GMSMapViews felt fine in testing.
+- Full test suite: 363/363 passed.
+- Build: succeeded with no new warnings.
+- No commit was made by Claude.
+
+Future requirement:
+- Tapping a dashboard widget should open its corresponding feature in full-screen app mode.
+
+Next: M5.3.0 — dashboard widget tap → full-screen feature navigation.

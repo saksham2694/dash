@@ -16,11 +16,15 @@
 //  never sees `MapViewModel` / `RouteViewModel` / `NavigationViewModel` / … —
 //  only `DashFeature`.
 //
-//  Not changed in M5.1: the routing / navigation algorithms, the wiring between
-//  the view models (that still lives in `MapFullScreenView`, driven by
-//  `LocationStore` while the Map screen is on-screen), and the Map UX.
+//  M5.2.1 adds the real dashboard widgets (`makeComponentView`) and a small
+//  deduped fix pump (`dashboardObserve`) so a live navigation session stays
+//  current while a Map dashboard component — rather than `MapFullScreenView` —
+//  is what's on screen. The routing / navigation algorithms and the full-screen
+//  Map UX are unchanged; the off-route → auto-reroute *adoption* still happens
+//  only in `MapFullScreenView`.
 //
 
+import DashShared
 import SwiftUI
 
 @MainActor
@@ -94,27 +98,50 @@ final class MapFeature: DashFeature {
         fullScreenView
     }
 
-    /// Dashboard widgets are M5.2 — every widget size shows a placeholder for
-    /// now. The real full-screen Map is `makeFullScreenView()`.
+    /// One cached dashboard view per size — same reasoning as `fullScreenView`:
+    /// `DashboardSpaceView` can re-evaluate its `body` for unrelated reasons
+    /// (connection-state churn), and handing back the same view value keeps the
+    /// widget map from being rebuilt. `MapComponentView` is stateless (`feature`
+    /// + `size`), so a layout that placed two widgets of one size would simply
+    /// render the same value in each grid slot.
+    private var componentViews: [ComponentSize: AnyView] = [:]
+
+    /// A real Map dashboard widget (M5.2.1). `.large` / `.medium` show a
+    /// widget-framed live map; `.compact` shows a glanceable maneuver / destination
+    /// readout with no map. Every size observes the app-scoped view models above —
+    /// no new `MapViewModel` / `NavigationViewModel` / … is created.
     func makeComponentView(size: ComponentSize) -> AnyView {
-        AnyView(MapComponentPlaceholder(size: size))
+        if let cached = componentViews[size] { return cached }
+        let view = AnyView(MapComponentView(feature: self, size: size))
+        componentViews[size] = view
+        return view
     }
-}
 
-/// Temporary stand-in for the Map dashboard widget (M5.2 replaces it with a
-/// real reduced-map / maneuver presentation).
-private struct MapComponentPlaceholder: View {
-    let size: ComponentSize
+    // MARK: - Dashboard fix pump (M5.2.1)
 
-    var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "map.fill").font(.title2)
-            Text("Maps").font(.headline)
-            Text("\(size.rawValue) widget — M5.2")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.regularMaterial)
+    /// Timestamp of the last fix pumped in via `dashboardObserve`. Several
+    /// mounted map widgets each call `dashboardObserve` per fix; this dedupes
+    /// them so the shared engine — in particular the M4.6 off-route detector,
+    /// which *counts* fixes — advances exactly once per fix.
+    private(set) var lastObservedDashboardFix: Date?
+
+    /// Feed the latest `LocationStore` fix into the shared view models while a
+    /// Map dashboard component is mounted, so a live navigation session
+    /// (vehicle, follow camera, route clip, maneuver progress, ETA) stays
+    /// current on the dashboard — not just in `MapFullScreenView`.
+    ///
+    /// This does **not** run the off-route → auto-reroute *adoption* path (that
+    /// stays in `MapFullScreenView`); the detector still classifies each fix, and
+    /// a reroute request it raises here is serviced when the full-screen view is
+    /// next shown.
+    func dashboardObserve(_ packet: LocationPacket?) {
+        guard let packet, packet.timestamp != lastObservedDashboardFix else { return }
+        lastObservedDashboardFix = packet.timestamp
+
+        mapViewModel.update(with: packet)
+        navigationViewModel.update(
+            with: MapCoordinate(latitude: packet.latitude, longitude: packet.longitude)
+        )
+        mapViewModel.setNavigationProgress(navigationViewModel.progress)
     }
 }
