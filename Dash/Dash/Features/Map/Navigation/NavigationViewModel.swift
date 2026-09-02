@@ -21,6 +21,13 @@
 //  manual Refresh without tearing down the session (progress re-seeds against
 //  the new route from the current position).
 //
+//  M4.6 adds smart off-route detection: a pure `OffRouteDetector` (fed every
+//  fix from `update(with:)`) classifies the vehicle as on / possibly-off /
+//  confirmed-off the route and, once per episode, raises `needsAutomaticReroute`.
+//  The composing view turns that into a `RouteViewModel.autoReroute(...)` call
+//  and adopts the recommended route via `reroute(to:from:)`. Detection re-arms
+//  whenever the route changes (`start` / `reroute` / `stop`).
+//
 
 import Combine
 import Foundation
@@ -39,7 +46,19 @@ final class NavigationViewModel: ObservableObject {
 
     @Published private(set) var state: State = .inactive
 
+    /// How the latest fix relates to the route being navigated (M4.6).
+    @Published private(set) var offRouteStatus: OffRouteStatus = .onRoute
+
+    /// Raised — once per off-route episode — when the detector has confirmed the
+    /// driver has left the route. The composing view reads this after
+    /// `update(with:)`, kicks off an automatic reroute, and calls
+    /// `clearRerouteRequest()`.
+    @Published private(set) var needsAutomaticReroute = false
+
     private(set) var route: Route?
+
+    /// Pure off-route detection state (M4.6). Re-armed on every route change.
+    private var offRouteDetector = OffRouteDetector()
 
     var isActive: Bool {
         if case .inactive = state { return false }
@@ -70,6 +89,7 @@ final class NavigationViewModel: ObservableObject {
             return
         }
         self.route = route
+        rearmOffRouteDetection()
         let progress = NavigationProgressCalculator.initial(for: route, at: origin)
         state = progress.isArrived ? .arrived : .navigating(progress)
     }
@@ -78,6 +98,7 @@ final class NavigationViewModel: ObservableObject {
     func stop() {
         route = nil
         state = .inactive
+        rearmOffRouteDetection()
     }
 
     /// Swap the route being navigated for one the driver picked after a manual
@@ -87,15 +108,36 @@ final class NavigationViewModel: ObservableObject {
     func reroute(to route: Route, from origin: MapCoordinate?) {
         guard isActive, !route.steps.isEmpty, let origin else { return }
         self.route = route
+        rearmOffRouteDetection()
         let progress = NavigationProgressCalculator.initial(for: route, at: origin)
         state = progress.isArrived ? .arrived : .navigating(progress)
     }
 
     /// Feed in the latest vehicle coordinate. No-op unless actively navigating.
+    /// Also drives off-route detection (M4.6).
     func update(with coordinate: MapCoordinate?) {
         guard let route, let coordinate, case .navigating(let previous) = state else { return }
         let progress = NavigationProgressCalculator.next(previous, route: route, position: coordinate)
         state = progress.isArrived ? .arrived : .navigating(progress)
+
+        guard case .navigating = state else {
+            offRouteStatus = .onRoute // arrived — stand down
+            return
+        }
+        let outcome = offRouteDetector.record(position: coordinate, on: route)
+        offRouteStatus = offRouteDetector.status
+        if outcome == .requestReroute { needsAutomaticReroute = true }
+    }
+
+    /// Acknowledge that the automatic-reroute request has been handled.
+    func clearRerouteRequest() {
+        needsAutomaticReroute = false
+    }
+
+    private func rearmOffRouteDetection() {
+        offRouteDetector.reset()
+        offRouteStatus = .onRoute
+        needsAutomaticReroute = false
     }
 
     // MARK: - Display

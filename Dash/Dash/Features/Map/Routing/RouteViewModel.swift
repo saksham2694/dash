@@ -13,8 +13,15 @@
 //
 //  Manual "Refresh Route" (M4.5) lives in a separate `refresh` field so the
 //  existing preview / navigation UI stays put while a refresh runs, and the new
-//  options are *offered* (never auto-applied). No timers, no automatic
-//  rerouting.
+//  options are *offered* (never auto-applied). No timers.
+//
+//  M4.6 adds `autoReroute(from:)` — an *automatic* recalculation triggered by
+//  off-route detection. It shares the `refresh` field and `refreshTask` with the
+//  manual path (so the two can never run at once and never double up), but marks
+//  the run automatic via `refreshWasAutomatic` so the composing view adopts the
+//  recommended route instead of offering the set. A cooldown
+//  (`autoRerouteCooldownSeconds`, from the last automatic run's completion) keeps
+//  it from hammering the Routes API; the manual Refresh is never gated by it.
 //
 
 import Combine
@@ -55,6 +62,21 @@ final class RouteViewModel: ObservableObject {
     @Published private(set) var state: State = .idle
     @Published private(set) var refresh: Refresh = .none
 
+    /// Whether the in-flight / most-recent `refresh` is an automatic off-route
+    /// reroute (M4.6 — adopt the recommended route) rather than the driver's
+    /// manual Refresh (offer the set). `@Published` so the composing view
+    /// re-renders the "Recalculating…" pill the instant an automatic reroute
+    /// starts — not only when `refresh` next changes.
+    @Published private(set) var refreshWasAutomatic = false
+
+    /// When the last automatic reroute finished (success or failure). Drives the
+    /// cooldown; `nil` until the first one runs and reset on a new destination.
+    private(set) var lastAutoRerouteFinishedAt: Date?
+
+    /// Minimum gap between automatic reroutes, measured from the previous one's
+    /// completion. The manual Refresh ignores this.
+    static let autoRerouteCooldownSeconds = 25.0
+
     /// The active/last initial-route task — exposed so tests can await it.
     private(set) var currentTask: Task<Void, Never>?
     /// The active refresh task — exposed so tests can await it.
@@ -85,6 +107,7 @@ final class RouteViewModel: ObservableObject {
         currentTask?.cancel()
         currentTask = nil
         cancelRefresh()
+        lastAutoRerouteFinishedAt = nil // a new trip starts with no cooldown
 
         self.destination = destination
 
@@ -123,7 +146,8 @@ final class RouteViewModel: ObservableObject {
 
     /// Fetch a fresh set of alternatives from the *current* `origin`, keeping the
     /// remembered `destination`. Result lands in `refresh` (never `state`), so
-    /// the current route stays active until the driver picks a new one.
+    /// the current route stays active until the driver picks a new one. Always
+    /// wins over an in-flight automatic reroute (cancels it, no double request).
     func refreshRoutes(from origin: MapCoordinate?) {
         refreshTask?.cancel()
         refreshTask = nil
@@ -131,17 +155,77 @@ final class RouteViewModel: ObservableObject {
         guard let destination else { return } // nothing to refresh
 
         guard let origin else {
+            refreshWasAutomatic = false
             refresh = .noCurrentLocation
             return
         }
 
+        startRefresh(to: destination, from: origin, automatic: false)
+    }
+
+    // MARK: - Automatic reroute (M4.6)
+
+    /// Whether an automatic reroute may start right now: there is a destination,
+    /// no refresh (manual or automatic) is already running, and the cooldown
+    /// since the last automatic reroute has elapsed.
+    func canAutoReroute(now: Date = Date()) -> Bool {
+        guard destination != nil, !isRecalculating else { return false }
+        if let last = lastAutoRerouteFinishedAt,
+           now.timeIntervalSince(last) < Self.autoRerouteCooldownSeconds {
+            return false
+        }
+        return true
+    }
+
+    /// Off-route detection confirmed the driver has left the route — request a
+    /// fresh set from the *current* `origin` to the remembered destination.
+    /// Returns whether a request was started; `false` means no destination, no
+    /// current fix, one already running, or still cooling down (the detector
+    /// will ask again). The result lands in `refresh` with `refreshWasAutomatic`
+    /// set, so the composing view adopts the recommended route.
+    @discardableResult
+    func autoReroute(from origin: MapCoordinate?, now: Date = Date()) -> Bool {
+        guard canAutoReroute(now: now), let destination, let origin else { return false }
+        startRefresh(to: destination, from: origin, automatic: true)
+        return true
+    }
+
+    /// Dismiss a refresh result / error — the driver kept the current route, or
+    /// the composing view adopted an automatic reroute.
+    func clearRefresh() {
+        cancelRefresh()
+    }
+
+    // MARK: - Recalculating state (drives the lightweight loading pill)
+
+    /// A refresh (manual or automatic) is fetching right now.
+    var isRecalculating: Bool {
+        if case .recalculating = refresh { return true }
+        return false
+    }
+
+    /// An *automatic* off-route reroute is fetching right now. Set the instant
+    /// `autoReroute` starts the request — synchronously, before the Routes API
+    /// responds — and cleared when the request resolves. The composing view
+    /// binds the "Recalculating…" pill to this.
+    var isAutomaticallyRecalculating: Bool {
+        isRecalculating && refreshWasAutomatic
+    }
+
+    // MARK: - Shared refresh machinery
+
+    private func startRefresh(to destination: Destination, from origin: MapCoordinate, automatic: Bool) {
+        refreshTask?.cancel()
+        refreshWasAutomatic = automatic
         refresh = .recalculating
+
         let target = destination.coordinate
         refreshTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let routes = try await service.routes(from: origin, to: target)
                 guard !Task.isCancelled else { return }
+                if automatic { lastAutoRerouteFinishedAt = Date() }
                 guard let options = RouteOptions(routes) else {
                     refresh = .failed(.noRoute)
                     return
@@ -150,21 +234,19 @@ final class RouteViewModel: ObservableObject {
             } catch is CancellationError {
                 return
             } catch let error as RouteError {
+                if automatic { lastAutoRerouteFinishedAt = Date() }
                 refresh = .failed(error)
             } catch {
+                if automatic { lastAutoRerouteFinishedAt = Date() }
                 refresh = .failed(.unavailable)
             }
         }
     }
 
-    /// Dismiss a refresh result / error — the driver kept the current route.
-    func clearRefresh() {
-        cancelRefresh()
-    }
-
     private func cancelRefresh() {
         refreshTask?.cancel()
         refreshTask = nil
+        refreshWasAutomatic = false
         refresh = .none
     }
 }

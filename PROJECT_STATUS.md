@@ -4,35 +4,43 @@ Living status document for **Dash**. It describes the repository as it actually
 stands so a future developer (or a fresh Claude Code session) can get oriented
 without conversation history.
 
-- **Last updated:** 2026-09-02
+- **Last updated:** 2026-09-03
 - **Branch:** `main`
-- **Latest commit:** `4697557 feat(map): add route info and eta` — Map **M4.4**
-  (route info & ETA + the camera / route-clip / layout polish pass, §5 item 30),
-  physically verified on device.
-- **Everything through M4.4 is committed.** Connection/pairing/relay-status →
+- **Latest commit:** `678e478 feat(map): add route alternatives` — Map **M4.5**
+  (multiple route options + manual route refresh, §5 item 31).
+- **Everything through M4.5 is committed.** Connection/pairing/relay-status →
   `9a02364` / `ec4d4a9` / `c3a3a18`; Map **M1** + **M2** → `973ffc9`; **M3** →
   `28b5be5` (Routes API device-verified; carries the `X-Ios-Bundle-Identifier`
   header); **M4.1** → `8255749`; **M4.2** → `d8b291e`; **M4.3** → `a262a9c`;
-  **M4.4** → `4697557`. See §10 for the mapping.
-- **Working tree (not yet committed):** **Map "M4.5" — multiple route options +
-  manual route refresh.** `RouteService.routes(from:to:)` now returns the
-  recommended route **plus alternatives** (`computeAlternativeRoutes: true`;
-  still `TRAFFIC_UNAWARE`); Google DTOs stay in `GoogleRouteService`, which keys
-  each `Route` `"route-<index>"`. New SDK-neutral **`RouteOptions`** (routes +
-  `selectedID` + `summaries`) holds selection; `RouteViewModel.state` carries a
-  `RouteOptions`, and a separate `refresh` field (`recalculating` / `options` /
-  `noCurrentLocation` / `failed`) drives a manual **"Refresh Route"** from the
-  *current* location that offers a fresh set without disturbing the active route.
-  `MapViewModel` owns route-selection + rendering: it draws all options
-  (selected `.selected`, others `.alternative` — stable ids so switching leaves
-  no stale line), `selectRouteOption` makes one active (preview: re-fits the
-  camera; navigation: adopts it + resets progress, camera only if follow is on),
-  and `MapEvent.tappedRoute` picks an alternative from the map in preview.
-  `NavigationViewModel.reroute(to:from:)` swaps the route mid-drive without
-  restarting the session. A compact `RouteOptionsPanelView` (duration / distance
-  / "Recommended" · "3 min faster" …) sits above the M4.4 preview row / below the
-  maneuver card. **No** traffic-aware routing, traffic colours, polling, off-route
-  detection, automatic rerouting, voice, or dashboard. See §5 item 31, §10.
+  **M4.4** → `4697557`; **M4.5** → `678e478`. See §10 for the mapping.
+- **Working tree (not yet committed):** **Map "M4.6" — smart off-route detection
+  + automatic rerouting** (with the 2026-09-03 physical-test refinement folded
+  in). New pure `OffRouteDetector` (in `Routing/`, reuses `RouteGeometry.project`):
+  classifies each fix `onRoute` / `possiblyOffRoute` / `confirmedOffRoute` behind
+  named conservative thresholds — **`onRouteToleranceMeters` 20 /
+  `offRouteThresholdMeters` 35** (hysteresis band between them) **/
+  `confirmationFixCount` 3** consecutive meaningful off-route fixes / re-signal
+  after 8 (tightened from 40 / 70 / 4 after a real drive — catches a wrong turn a
+  road-width sooner, still can't fire on one or two noisy fixes) — and raises a
+  **once-per-episode** signal. `NavigationViewModel` owns the detector, feeds it
+  every fix from `update(with:)`, exposes `offRouteStatus` +
+  `needsAutomaticReroute`, and re-arms it on any route change (`start` /
+  `reroute` / `stop`). `RouteViewModel.autoReroute(from:)` recomputes from the
+  **current** location to the remembered destination through the *same* `refresh`
+  field / task as the manual Refresh (so the two can never run at once or double
+  up), flagged **`@Published refreshWasAutomatic`**; the derived
+  **`isAutomaticallyRecalculating`** is set *synchronously* the instant the
+  request starts (not after the API responds) and drives a small non-blocking
+  **"Recalculating…"** pill that snaps in under the maneuver card. A cooldown
+  (`autoRerouteCooldownSeconds` 25, from the last automatic run's completion)
+  keeps it off the Routes API — the manual Refresh ignores it. `ContentView`
+  turns a confirmed signal into `autoReroute(...)`, and on success **adopts the
+  recommended route** (`NavigationViewModel.reroute` + `MapViewModel.selectRouteOption`
+  + progress re-seed) while keeping destination / mode / vehicle and leaving the
+  alternatives in `MapViewModel.routeOptions`; on failure the session is left
+  intact and the pill becomes "Couldn't recalculate — keeping current route".
+  **No** traffic-aware routing, traffic colours, continuous polling, voice
+  guidance, or dashboard work. See §5 item 32, §10.
 - **Authoritative requirements:** `PROJECT_SPEC.pdf` (repo root) — "iPad CarPlay-style Dashboard — Project Spec"
 - **Day-to-day guidance:** `CLAUDE.md` (repo root)
 
@@ -101,7 +109,7 @@ dash/
     ├── Dash/                        # iPad app target
     │   ├── DashApp.swift            # @main; owns LocationStore + ConnectionCoordinator + KnownDeviceStore; bootstraps Google Maps + Places
     │   ├── RootView.swift           # connection gate: ContentView (+ ConnectedControlView overlay) when isConnected, else ConnectionSetupView
-    │   ├── ContentView.swift        # Map-feature composition: DashMapView + MapSearchView overlay; owns MapViewModel + PlaceSearchViewModel + DestinationStore (placeholder shell, not the dashboard)
+    │   ├── ContentView.swift        # Map-feature composition: DashMapView + MapSearchView overlay; owns MapViewModel + PlaceSearchViewModel + DestinationStore + RouteViewModel + NavigationViewModel; wires the M4.6 off-route signal → auto-reroute + recommended-route adoption (placeholder shell, not the dashboard)
     │   ├── Info.plist               # NSBonjourServices, GoogleMapsAPIKey = $(GOOGLE_MAPS_API_KEY)
     │   ├── Configuration/
     │   │   ├── GoogleMapsConfiguration.swift   # reads key from Info.plist, calls GMSServices.provideAPIKey; also exposes `apiKey`
@@ -127,7 +135,7 @@ dash/
     │       ├── MapOverlay.swift                # MapPolyline (+ role: selected/alternative, M4.5) + MapMarker (identified, diffable overlay descriptors)
     │       ├── MapEvent.swift                  # taps (map / POI / marker / route, M4.5) + camera-idle (byUserGesture, M4.2-filtered); MapPOI, MapCameraPosition
     │       ├── MapMode.swift                   # cruising / destinationPreview / navigating (all realised; startNavigation() enters navigating, M4.3)
-    │       ├── MapViewModel.swift              # owns mode + route + routeOptions (M4.5 selection) + followsVehicle + navigationProgress; setRouteOptions / selectRouteOption; startNavigation(); dynamic nav zoom; clips + roles the route polylines; derives MapContent
+    │       ├── MapViewModel.swift              # owns mode + route + routeOptions (M4.5 selection) + followsVehicle + navigationProgress; setRouteOptions / selectRouteOption (also the M4.6 auto-reroute adopt path); startNavigation(); dynamic nav zoom; clips + roles the route polylines; derives MapContent
     │       ├── DashMapView.swift               # neutral SwiftUI component; overlays the RecenterButton (M4.2)
     │       ├── RecenterButton.swift            # M4.2 — small "resume follow" affordance (presentational; NOT in GoogleMapProvider)
     │       ├── GoogleMapProvider.swift         # ONLY Map file importing GoogleMaps; wraps GMSMapView, diffs overlays + vehicle + camera, UserGestureLatch (willMove-based)
@@ -138,8 +146,9 @@ dash/
     │       │   ├── DestinationStore.swift      # @MainActor ObservableObject — the chosen Destination? (source of truth)
     │       │   ├── PlaceSearchViewModel.swift  # SDK-free: debounce, suggestions, resolve-to-Destination via onDestinationChosen
     │       │   └── MapSearchView.swift         # custom search field + suggestions list + selected-destination chip (presentational)
-    │       ├── Routing/                        # M3–M4.5 — driving route, turn-by-turn, ETA, alternatives (NO SDK anywhere; GoogleRouteService is REST-only)
+    │       ├── Routing/                        # M3–M4.6 — driving route, turn-by-turn, ETA, alternatives, off-route detection (NO SDK anywhere; GoogleRouteService is REST-only)
     │       │   ├── Route.swift                 # SDK-neutral: id (M4.5) + polyline + distanceMeters + Duration + steps [RouteStep] (M4.3)
+    │       │   ├── OffRouteDetector.swift      # M4.6 — pure classifier: onRoute/possiblyOffRoute/confirmedOffRoute + once-per-episode reroute signal (reuses RouteGeometry.project)
     │       │   ├── RouteStep.swift             # M4.3 — SDK-neutral maneuver: ManeuverType + instruction + roadName + maneuverPoint + polyline + distance
     │       │   ├── RouteOptions.swift          # M4.5 — SDK-neutral: routes [Route] + selectedID + summaries (duration/distance/relative label)
     │       │   ├── RouteService.swift          # provider-neutral protocol (routes(from:to:) → [Route], M4.5) + RouteError
@@ -148,10 +157,10 @@ dash/
     │       │   ├── RouteGeometry.swift         # M4.3 — pure geodesic: haversine, polyline length, project point → polyline; + M4.4 remainingPolyline(of:from:)
     │       │   ├── RouteProgress.swift         # M4.3 — pure engine: NavigationProgress + NavigationProgressCalculator; + M4.4 remainingDuration(along:)
     │       │   ├── RouteFormatting.swift       # M4.4 — pure RouteFormat (distance / duration / locale-aware clock) + Duration.inSeconds
-    │       │   ├── RouteViewModel.swift        # SDK-free: state = idle/loading/loaded(RouteOptions)/noCurrentLocation/failed; refresh = none/recalculating/options/… (M4.5 manual refresh)
+    │       │   ├── RouteViewModel.swift        # SDK-free: state = idle/loading/loaded(RouteOptions)/…; refresh = none/recalculating/options/… (M4.5 manual + M4.6 automatic reroute — shared field/task, refreshWasAutomatic + cooldown)
     │       │   └── RouteStatusView.swift       # small transient loading/error pill (presentational)
-    │       └── Navigation/                     # M4.3–M4.5 — turn-by-turn session, info panel, route-option selector (SDK-neutral)
-    │           ├── NavigationViewModel.swift   # @MainActor: start/stop/update/reroute (M4.5), state, builds ManeuverCard; routeInfo(now:) (M4.4)
+    │       └── Navigation/                     # M4.3–M4.6 — turn-by-turn session, info panel, route-option selector, off-route detection (SDK-neutral)
+    │           ├── NavigationViewModel.swift   # @MainActor: start/stop/update/reroute, state, ManeuverCard, routeInfo(now:); owns OffRouteDetector → offRouteStatus + needsAutomaticReroute (M4.6)
     │           ├── ManeuverCard.swift          # presentational model + NavigationDistance formatting
     │           ├── ManeuverCardView.swift      # top-of-map card (arrow + distance + instruction/road + Refresh (M4.5) + End) (presentational)
     │           ├── RouteInfo.swift             # M4.4 — SDK-neutral display model: preview(route:) / remaining(route:progress:) → distance/duration/ETA text + Kind labels
@@ -177,6 +186,7 @@ dash/
     │   ├── CameraFollowTests.swift            # M4.2: follow on/off, any user gesture disables (incl. tiny), recenter, navigation plan, UserGestureLatch
     │   ├── NavigationTests.swift              # M4.3: RouteGeometry, progress engine, NavigationViewModel (+ M4.5 reroute), ManeuverCard, nav camera/zoom; + M4.4 remainingPolyline + route-clip rendering + camera anchor
     │   ├── RouteInfoTests.swift               # M4.4: RouteFormat (distance/duration/clock), Duration.inSeconds, remainingDuration, RouteInfo preview/remaining, NavigationViewModel.routeInfo
+    │   ├── OffRouteTests.swift                # M4.6: OffRouteDetector classification/hysteresis/re-signal, RouteViewModel.autoReroute (current origin, cooldown, no-concurrency w/ manual), NavigationViewModel off-route signal, reroute adoption
     │   └── DashTests.swift          # scaffold `example()` — no-op, still present
     ├── DashUITests/                 # Xcode scaffold only, no real tests
     └── DashRelay/                   # iPhone app target
@@ -588,9 +598,10 @@ not replace their responsibilities.
     small — and `false` for programmatic camera moves. No distance/zoom threshold.
   - `MapMode` — `cruising` / `destinationPreview` / `navigating`. All three have
     realised camera framing. `MapViewModel.startNavigation()` (M4.3) drives the
-    app into `.navigating` from the route preview; guidance beyond the maneuver
-    card + dynamic zoom (off-route detection, rerouting, voice) is out of scope
-    for M4.3.
+    app into `.navigating` from the route preview. Guidance layered on since:
+    maneuver card + dynamic zoom (M4.3), ETA / route-clip (M4.4), route options /
+    refresh (M4.5), off-route detection + automatic rerouting (M4.6). Voice /
+    lane guidance / traffic-aware ETA remain out of scope.
   - `MapViewModel` — holds `any MapProvider` + `mode` + retained `camera` +
     `destination` + `route` (the *active* route) + **`routeOptions`** (M4.5, the
     choices + selection) + **`followsVehicle`** (M4.2) +
@@ -669,12 +680,22 @@ not replace their responsibilities.
     a route-option tap → `mapVM.selectRouteOption` (preview) or
     `navVM.reroute` + `mapVM.selectRouteOption` + `routeVM.clearRefresh` (adopt a
     refreshed route mid-drive), the maneuver card's Refresh tap →
-    `routeVM.refreshRoutes(from: currentOrigin)`. A bottom `TimelineView`
+    `routeVM.refreshRoutes(from: currentOrigin)`. **M4.6:** after
+    `navVM.update(with:)`, if `navVM.needsAutomaticReroute` →
+    `navVM.clearRerouteRequest()` + `routeVM.autoReroute(from: currentOrigin)`;
+    `routeVM.refresh (.options)` with `refreshWasAutomatic` → `adoptAutomaticReroute`
+    (`navVM.reroute` + `mapVM.setRouteOptions` + `mapVM.selectRouteOption(recommended)`
+    + `mapVM.setNavigationProgress` + `routeVM.clearRefresh`), else the M4.5
+    offer path. A small **"Recalculating…"** pill (bound to
+    `routeVM.isAutomaticallyRecalculating`, snap-in transition) shows under the
+    maneuver card for the whole automatic request, becoming "Couldn't
+    recalculate — keeping current route" on failure. A bottom `TimelineView`
     overlay (ETA stays current) shows the `RouteOptionsPanelView` +
     `RouteInfoPanelView` (M4.4 preview row unchanged) / live panel. The
     components don't know each other.
 - **[Implemented]** Routing (M3 — item 26) + turn-by-turn (M4.3 — item 29) +
-  route info / ETA (M4.4 — item 30) + multiple routes / refresh (M4.5 — item 31):
+  route info / ETA (M4.4 — item 30) + multiple routes / refresh (M4.5 — item 31)
+  + off-route detection / auto-reroute (M4.6 — item 32):
   - `Route` — SDK-neutral: **`id`** (M4.5, `"route-<index>"` from the provider),
     `polyline`, `distanceMeters`, `duration: Duration`, and **`steps: [RouteStep]`**
     (M4.3; `[]` without step data).
@@ -724,7 +745,21 @@ not replace their responsibilities.
     re-seed progress from the current position, session kept); `state` =
     `inactive` / `navigating(NavigationProgress)` / `arrived`; builds the
     `ManeuverCard`. **M4.4:** `routeInfo(now:)` → the live `RouteInfo` (`nil`
-    when inactive or arrived).
+    when inactive or arrived). **M4.6:** owns an `OffRouteDetector`, feeds it
+    every fix from `update(with:)`, and exposes `offRouteStatus` +
+    `needsAutomaticReroute` (once per episode; `clearRerouteRequest()` after the
+    view acts). `start` / `reroute` / `stop` re-arm the detector.
+  - `OffRouteDetector` (M4.6) — pure, SDK-neutral. `record(position:on:)` snaps
+    the fix onto `route.polyline` via `RouteGeometry.project` and classifies it
+    `onRoute` (≤ `onRouteToleranceMeters` **20**) / `possiblyOffRoute` /
+    `confirmedOffRoute`. Named conservative thresholds: a hysteresis band up to
+    `offRouteThresholdMeters` (**35**) where a fix neither confirms nor clears;
+    `confirmationFixCount` (**3**) consecutive meaningful off-route fixes to
+    confirm — so one or two noisy fixes never trigger; `resignalAfterFixes` (8)
+    before it re-asks for a still-unresolved episode (covers a request the
+    coordinator dropped for cooldown). (Tightened from 40 / 70 / 4 after a
+    physical drive, 2026-09-03.) Rejoining (≤ tolerance) ends the episode and
+    re-arms; `reset()` re-arms explicitly.
   - `NavigationProgress.remainingDuration(along: route)` (M4.4) — pure: scales
     `route.duration` by the fraction of `distanceRemainingMeters` left (no
     traffic model), `.zero` on arrival or a zero-length route. Keeps the ETA
@@ -753,8 +788,20 @@ not replace their responsibilities.
     separate `refresh` field (`none` / `recalculating` / `options(RouteOptions)` /
     `noCurrentLocation` / `failed`) so the active route / preview / nav UI is
     undisturbed; `clearRefresh()` dismisses it; a fresh `requestRoutes` cancels
-    any pending refresh. **No automatic rerouting / polling** — every request is
-    a destination change, a Retry, or the driver's Refresh tap.
+    any pending refresh. **M4.6 automatic reroute:** `autoReroute(from:now:)` —
+    triggered by off-route detection — runs through the *same* `refresh` field
+    and `refreshTask` (so manual + automatic can never run at once or double up),
+    marked via **`@Published refreshWasAutomatic`** so the view adopts the
+    recommended route instead of offering the set. `canAutoReroute(now:)` gates
+    it: a destination, nothing else refreshing, and the
+    `autoRerouteCooldownSeconds` (25) since the last automatic run's completion
+    elapsed — the **manual Refresh is never gated by the cooldown**, and always
+    wins over an in-flight automatic run. A new destination clears the cooldown.
+    Still **no polling / timers**. Derived `isRecalculating` /
+    **`isAutomaticallyRecalculating`** expose the loading state *synchronously*
+    the instant `autoReroute` starts the request (before the API responds) — the
+    composing view binds the "Recalculating…" pill to it, and `refreshWasAutomatic`
+    being `@Published` guarantees SwiftUI re-renders on that transition.
   - `MapViewModel.setRoute(_ route: Route?)` — a one-route convenience over
     `setRouteOptions` (see the abstraction section above for the M4.5 selection
     API). `setDestination(_:)` clears the route + options + nav progress.
@@ -979,6 +1026,35 @@ not replace their responsibilities.
   distance ("0 m"); `NavigationViewModel.routeInfo` is `nil` inactive, live once
   navigating, `nil` again after arrival. **Pure — ETA computed from an injected
   `now`, no real clock.**
+- **[Verified · automated]** `OffRouteTests` (M4.6, 38): **`OffRouteDetector`** —
+  on-route stays quiet, a single noisy fix never triggers, **two consecutive
+  meaningful fixes still don't trigger** (the third confirms), < `confirmationFixCount`
+  stays "possibly", a run confirms + signals **once**, the hysteresis band never
+  confirms, a still-off-route episode **re-signals after `resignalAfterFixes`**,
+  rejoining ends the episode and a later deviation can trigger again, `reset()`
+  re-arms, a degenerate route polyline is inert; **the refined thresholds**
+  (20 / 35 / 3) are asserted explicitly — hysteresis kept, count ≥ 3, a ~25 m
+  drift reads "possibly" (not on-route), a ~40 m deviation confirms on the third
+  fix; **`RouteViewModel.autoReroute`** — uses the current origin + remembered
+  destination, offers the set with `refreshWasAutomatic` while `state` is
+  untouched, a failure keeps `state` + arms the cooldown, no destination / no fix
+  → no request, **no concurrent auto reroutes**, **refused while a manual refresh
+  runs**, a manual refresh **interrupts an in-flight auto reroute** with no stale
+  result, the **cooldown blocks a second run until it elapses**, the **manual
+  Refresh ignores the cooldown**, a new destination clears it, `clearRefresh`
+  resets the flag; **the loading state** — `isAutomaticallyRecalculating` is
+  `true` *synchronously* the instant `autoReroute` starts (before the request
+  resolves), `objectWillChange` fires so SwiftUI observes it, a manual refresh's
+  recalculating state is **not** flagged automatic, a failed auto-reroute drops
+  the loading state but keeps `refreshWasAutomatic` for the failure copy,
+  `clearRefresh` ends it; **`NavigationViewModel`** — on-route drive never asks,
+  one wild fix never asks, a sustained deviation raises `needsAutomaticReroute`
+  once and `clearRerouteRequest` clears it, `reroute()` re-arms against the new
+  route, `stop()` clears, inactive updates are inert; **adoption** (the exact
+  `ContentView` call sequence) — session / mode / destination / vehicle
+  preserved, progress re-seeded against the new route, the alternatives retained
+  in `MapViewModel.routeOptions` and the old geometry gone. **Pure — no SDK, no
+  live Routes API, `now` injected for the cooldown.**
 - **[Verified · on device / simulator]** Dash builds (clean, no warnings). Before
   the M1 pass it launched, initialised the Google Maps SDK (v11.1.0), and
   rendered the map + vehicle marker.
@@ -1024,19 +1100,22 @@ not replace their responsibilities.
   unit tests. Committed `a262a9c`.
 - **[Verified · on device]** **M4.4** route info & ETA (+ the camera / route-clip
   / layout polish pass) on the physical iPad. Committed `4697557`.
-- **[Not yet verified on device — installed, awaiting a check]** **M4.5** multiple
-  route options + manual route refresh (working tree). On a real screen, still to
-  confirm: the destination preview shows alternative polylines + the compact
-  option selector; tapping a chip (or a polyline) reselects and re-fits without
-  starting navigation; Start uses the selected route; during navigation the
-  maneuver-card **Refresh** recalculates from the current position (spinner while
-  running, "waiting for GPS" when there's no fix), the recalculated options
-  appear as a selector, picking one swaps the active route without restarting the
-  session and drops the old geometry, dismissing keeps the current route; the
-  camera is not forced when follow is off. Builds clean (app + device), +27 unit
-  tests, installed on the iPad. The selection / refresh / render state is
-  unit-tested; what remains is the visual + gesture check (and one live
-  `computeRoutes` call to confirm Google actually returns alternatives).
+- **[Verified · on device]** **M4.5** multiple route options + manual route
+  refresh. Committed `678e478`. +27 unit tests cover the selection / refresh /
+  render state.
+- **[Not yet verified on device]** **M4.6** smart off-route detection +
+  automatic rerouting (working tree). On a real drive, still to confirm: the
+  detector's thresholds behave on a genuine missed turn (confirm within a few
+  fixes, no false trigger on a bad-GPS stretch); the automatic `computeRoutes`
+  reroute fires; the recommended route is adopted mid-drive without restarting
+  the session (progress / follow camera / maneuver card / ETA stay correct); the
+  "Recalculating…" pill shows without covering the map; a failed reroute leaves
+  the current route intact; the 25 s cooldown and the manual-Refresh interaction
+  hold up. Builds clean (app), +38 unit tests, not yet installed / driven.
+  *(2026-09-03 refinement folded in: thresholds tightened to 20 / 35 / 3, and the
+  "Recalculating…" pill now bound to a synchronously-set `@Published` state so it
+  is visible for the whole request — both covered by new unit tests, still to see
+  on a real drive.)*
 
 ### End-to-end
 
@@ -1075,11 +1154,12 @@ not replace their responsibilities.
 |---|---:|---|
 | `DashSharedTests` | 8 | `swift test` |
 | `DashRelayTests` | 32 | `xcodebuild ... -scheme DashRelay` (iOS Simulator) |
-| `DashTests` | 258 (per the Xcode test plan; incl. 1 no-op scaffold; +29 M3, +12 M4.1, +20 M4.2, +37 M4.3, +29 M4.4, +27 M4.5) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
+| `DashTests` | 293 (per `xcresulttool`; incl. 1 no-op scaffold; +29 M3, +12 M4.1, +20 M4.2, +37 M4.3, +29 M4.4, +27 M4.5, +38 M4.6) | `xcodebuild ... -scheme Dash` (iOS Simulator) |
 
-Last full run (`xcodebuild test -scheme Dash -only-testing:DashTests`, iPad
-simulator, 2026-09-02, with M4.5 in the working tree): all pass (0 failures),
-build clean (app + device) with no warnings.
+Last full run (`xcodebuild test -scheme Dash -only-testing:DashTests`, iOS
+simulator, 2026-09-03, with M4.6 + its 2026-09-03 refinement in the working
+tree): all pass — **293/293** reported by `xcresulttool`, 0 failures; build
+clean (app) with no source warnings.
 
 `DashSharedTests` breakdown: `LocationPacketTests` (4), `RelayAdvertisementTests` (4).
 `DashRelayTests` breakdown: `LocationTrackerTests` (7), `LocationBroadcasterTests`
@@ -1104,7 +1184,10 @@ in `MapContentTests.swift`; `GooglePlaceSuggestionMappingTests` +
 `NavigationViewModelTests` + `ManeuverCardModelTests` + `NavigationCameraTests` +
 `RemainingRouteRenderTests` (M4.4 route clipping) in `NavigationTests.swift`;
 `RouteFormatTests` + `DurationInSecondsTests` + `RemainingDurationTests` +
-`RouteInfoTests` + `NavigationRouteInfoTests` (M4.4) in `RouteInfoTests.swift`.
+`RouteInfoTests` + `NavigationRouteInfoTests` (M4.4) in `RouteInfoTests.swift`;
+`OffRouteDetectorTests` + `RouteViewModelAutoRerouteTests` +
+`NavigationViewModelOffRouteTests` + `AutomaticRerouteAdoptionTests` (M4.6) in
+`OffRouteTests.swift`.
 (Map / search / routing have no SDK-level tests — `GoogleMapProvider` /
 `GMSMapView` (incl. the M4.1 vehicle-marker drawing and the M4.2 `.navigation`
 camera / gesture wiring), `GooglePlaceSearchService` / `GMSPlacesClient`, and the
@@ -1665,6 +1748,66 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
       render state is unit-tested (+27), the visual + gesture check and one live
       `computeRoutes` alternatives call are pending (§3, §10).
 
+32. **Map "M4.6": smart off-route detection + automatic rerouting (2026-09-02;
+    refined 2026-09-03 after a physical drive).**
+    Detect when the driver has genuinely left the route and silently fetch a
+    fresh one from the current position. **No** traffic-aware routing, traffic
+    colours, continuous polling, voice guidance, or dashboard work.
+    - **Detection is a pure engine, reusing the M4.3 geometry.**
+      `OffRouteDetector` (`Routing/`, no SDK / Combine / async) snaps each fix
+      onto `route.polyline` with `RouteGeometry.project` and classifies it
+      `onRoute` / `possiblyOffRoute` / `confirmedOffRoute`. **Named conservative
+      thresholds** (tightened in the 2026-09-03 refinement from 40 / 70 / 4 —
+      the original felt too slow in the car): `onRouteToleranceMeters` (**20**,
+      ~1 lane) and `offRouteThresholdMeters` (**35**, ~a road away) with a
+      hysteresis band between them, `confirmationFixCount` (**3**) *consecutive
+      meaningful* off-route fixes to confirm — one **or two** noisy fixes can
+      never trigger — and `resignalAfterFixes` (8) before it re-asks for a
+      still-unresolved episode. It signals **once per episode**; rejoining the
+      route (≤ tolerance) ends the episode and re-arms.
+    - **One navigation/routing state system, not a second.**
+      `NavigationViewModel` owns the detector (fed from the existing
+      `update(with:)` fix pump), exposes `offRouteStatus` +
+      `needsAutomaticReroute`, and re-arms on `start` / `reroute` / `stop`.
+      `RouteViewModel.autoReroute(from:)` runs through the **same `refresh` field
+      and `refreshTask`** as the M4.5 manual Refresh — so the two can never run
+      at once or double up — distinguished only by `refreshWasAutomatic`.
+    - **Current location → existing destination.** `autoReroute` uses the latest
+      origin `ContentView` already feeds in and the destination `RouteViewModel`
+      already remembers. No fix → it returns false silently (the detector
+      re-asks); no destination → false.
+    - **Cooldown + concurrency.** `canAutoReroute(now:)` refuses a second
+      automatic run within `autoRerouteCooldownSeconds` (25) of the previous
+      one's *completion* (success or failure), or while any refresh is in
+      flight. The **manual Refresh is never gated by the cooldown** and always
+      wins over an in-flight automatic run (cancels it). A new destination
+      clears the cooldown.
+    - **Adopt on success, keep everything on failure.** On a fresh set
+      `ContentView.adoptAutomaticReroute` runs `NavigationViewModel.reroute` +
+      `MapViewModel.setRouteOptions` + `selectRouteOption(recommended)` +
+      `setNavigationProgress` — the recommended route becomes active, progress
+      re-seeds against it, and destination / navigation mode / vehicle indicator
+      / camera-follow / maneuver guidance / ETA / remaining-route clipping are
+      all untouched. The returned **alternatives stay in
+      `MapViewModel.routeOptions`** (drawn `.alternative`). On failure the
+      handler does nothing — the existing route + session stand.
+    - **Lightweight "Recalculating…" state, visible for the whole request
+      (2026-09-03 refinement).** `RouteViewModel` exposes derived
+      `isRecalculating` / **`isAutomaticallyRecalculating`**, and
+      `refreshWasAutomatic` is now `@Published` — so the state flips
+      *synchronously* the instant `autoReroute` starts the request (never
+      waiting on the API) and SwiftUI re-renders on that transition. The pill is
+      a small material capsule under the maneuver card with a snap-in transition
+      (a fast Routes response can't leave it mid-fade); it never covers the map
+      and the current guidance stays on screen. A failed automatic reroute
+      swaps it for a dismissible "Couldn't recalculate — keeping current route"
+      pill.
+    - **Google stays isolated.** No `RouteService` / `GoogleRouteService` change
+      — `autoReroute` reuses `RouteService.routes(from:to:)`.
+    - **Not yet device-verified** — off-route classification (incl. the refined
+      thresholds), auto-reroute, adoption, and the loading-state transition are
+      unit-tested (+38); a live drive that misses a turn is pending (§3, §10).
+
 ---
 
 ## 6. Current limitations / known issues
@@ -1722,12 +1865,35 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
   before the first fix, the state is `.noCurrentLocation` and stays there until
   the user taps Retry (or re-selects). Deliberate — M3 has no location observer
   in the routing layer and no auto-reroute.
-- **M4.3: off-route / wrong-turn handling is out of scope.** Progress worked on
-  the verification drive, but there is no off-route detection or rerouting — if
-  the driver misses a turn the card stays on the stale maneuver until they rejoin
-  the route. A route that doubles back close to the vehicle can also mis-snap.
-  The ~80 m off-route-ignore threshold only stops a noisy fix from *skipping*
-  maneuvers; it does not detect being genuinely off-route. (M4.4+.)
+- **M4.6: off-route detection projects onto the overview polyline.**
+  `OffRouteDetector` measures the vehicle against `route.polyline` (the coarser
+  overview geometry, not the per-step polylines), same as the M4.4 route clip.
+  On a route that doubles back close to itself the projection can jump. The
+  2026-09-03 refinement tightened the thresholds (35 m, 3 consecutive fixes) for
+  a snappier response; the hysteresis band + 3-fix confirmation still keep a
+  burst of bad GPS from triggering, but the tighter numbers have **not** been
+  run against a real drive that misses a turn yet — that check is the main open
+  item for M4.6.
+- **M4.6: after an automatic reroute the alternatives are not offered as a
+  chooser.** The recommended route is adopted and the alternatives remain in
+  `MapViewModel.routeOptions` (drawn dimmed on the map, tappable only in
+  preview), but no `RouteOptionsPanelView` is shown mid-navigation for them —
+  consistent with the M4.5 decision that a stray tap while driving can't switch
+  the active route. The driver can still hit the manual Refresh.
+- **M4.6: a cooldown collision can delay a second reroute.** If the vehicle is
+  off the *new* route within `autoRerouteCooldownSeconds` (25) of the last
+  automatic reroute, the detector re-signals (every 8 fixes) but `autoReroute`
+  refuses until the cooldown elapses — up to ~25 s to the next attempt. Rare
+  (the adopted route normally passes through the current position) and
+  conservative by design.
+- **M4.6: `NavigationViewModel` still does not observe `LocationStore`.** The
+  off-route detector, like progress, only advances while `ContentView` pumps
+  fixes into `update(with:)` — fine today (it is the only screen).
+- **M4.3: wrong-turn *guidance* still lags until rejoin.** With M4.6 the app now
+  recomputes a route when the driver leaves it, but between the missed turn and
+  the adopted route the maneuver card can still show the stale maneuver (the
+  ~80 m progress-engine off-route-ignore threshold stops a noisy fix from
+  *skipping* maneuvers; it does not re-anchor guidance).
 - **M4.3: `NavigationViewModel` does not observe `LocationStore` itself.**
   `ContentView` pumps each fix into `navVM.update(with:)` and relays
   `progress` to `MapViewModel` — consistent with `RouteViewModel`, but it means
@@ -1757,8 +1923,9 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
 - **M4.4-polish: the shortened route line snaps to the overview polyline.**
   `remainingPolyline` projects the vehicle onto `route.polyline` (the overview
   geometry, ~coarser than the per-step polylines). On a route that doubles back
-  close to itself the projection can jump, briefly clipping the wrong part; there
-  is no off-route detection to catch this. Fine for ordinary routes.
+  close to itself the projection can jump, briefly clipping the wrong part.
+  M4.6's `OffRouteDetector` shares this projection basis (and the same caveat).
+  Fine for ordinary routes.
 - **M4.4-polish: the navigation camera anchor is a fixed fraction.**
   `vehicleVerticalAnchor = 0.6` is not aware of the actual on-screen panel /
   maneuver-card heights or the device aspect ratio — it is a constant chosen to
@@ -1767,11 +1934,12 @@ mocked `URLSession`; `GoogleMapProvider.vehicleStyle` / `.UserGestureLatch`, the
   hint — the API often returns a single route for short / unambiguous trips. The
   app degrades to the M4.4 single-route behaviour (no selector, one polyline);
   this hasn't been checked against the live API yet, only canned responses.
-- **M4.5: refreshed alternatives can go stale.** After a mid-navigation refresh,
-  the alternatives are computed from that moment's position and keep drawing
-  (dimmed) as the drive continues. There is no re-evaluation — the driver either
-  adopts one or dismisses. A proper reroute engine (off-route detection, live
-  re-eval) is a later milestone.
+- **M4.5: refreshed alternatives can go stale.** After a mid-navigation *manual*
+  refresh, the alternatives are computed from that moment's position and keep
+  drawing (dimmed) as the drive continues. There is no re-evaluation — the
+  driver either adopts one or dismisses. (M4.6 adds *automatic* off-route
+  rerouting, which adopts the recommended route straight away rather than
+  leaving a set on screen.)
 - **M4.5: adopting a refreshed route re-seeds progress from the *current*
   position.** If the current fix is momentarily off the new route's geometry,
   `NavigationProgressCalculator.initial` still snaps to the nearest point — fine
@@ -1910,19 +2078,27 @@ From `PROJECT_SPEC.pdf` / `CLAUDE.md`, still absent from the repo:
   `a262a9c`.
 - **[Implemented · device-verified]** M4.4 route info & ETA + the camera /
   route-clip / layout polish pass (§5 item 30). Committed `4697557`.
-- **[Implemented · unit-tested, device-unverified]** M4.5 multiple route options
-  + manual route refresh (§5 item 31): `RouteService.routes(...) -> [Route]` +
+- **[Implemented · device-verified]** M4.5 multiple route options + manual route
+  refresh (§5 item 31): `RouteService.routes(...) -> [Route]` +
   `computeAlternativeRoutes`, `RouteOptions`, `RouteViewModel` (`loaded(RouteOptions)`
   + `refresh`), `MapViewModel.setRouteOptions` / `selectRouteOption`,
   `MapPolyline.role`, `MapEvent.tappedRoute`, `NavigationViewModel.reroute`,
-  `RouteOptionsPanelView`, the maneuver-card Refresh button. Installed on the
-  iPad; visual + gesture check and one live alternatives call pending (§3, §10).
-  Working tree — not committed.
-- **[Planned]** Map layer depth, remaining (the rest of **M4**): off-route
-  detection + automatic rerouting, a **traffic-aware** ETA
-  (`routingPreference: TRAFFIC_AWARE` — a billing change), voice guidance, lane
-  guidance. Also: turning a map POI tap (`MapEvent.tappedPOI`) into a
-  destination; an Apple `MKDirections` `RouteService`.
+  `RouteOptionsPanelView`, the maneuver-card Refresh button. Committed `678e478`.
+- **[Implemented · unit-tested, device-unverified]** M4.6 smart off-route
+  detection + automatic rerouting (§5 item 32; 2026-09-03 refinement folded in):
+  `OffRouteDetector` (pure, reuses `RouteGeometry.project`; thresholds 20 / 35 /
+  3), `NavigationViewModel.offRouteStatus` / `needsAutomaticReroute` + detector
+  re-arm, `RouteViewModel.autoReroute(from:)` + `@Published refreshWasAutomatic`
+  + derived `isAutomaticallyRecalculating` + `canAutoReroute` cooldown (shared
+  `refresh` field / task with the manual path), `ContentView` off-route →
+  auto-reroute → recommended-route adoption + the synchronously-shown
+  "Recalculating…" pill. +38 unit tests; a live missed-turn drive is pending
+  (§3, §10). Working tree — not committed.
+- **[Planned]** Map layer depth, remaining (the rest of **M4**): a
+  **traffic-aware** ETA (`routingPreference: TRAFFIC_AWARE` — a billing change),
+  voice guidance, lane guidance. Also: turning a map POI tap
+  (`MapEvent.tappedPOI`) into a destination; an Apple `MKDirections`
+  `RouteService`.
 - **[Planned]** Dock-style row of favourite/frequent destinations.
 - **[Future idea]** Weather widget (WeatherKit free tier).
 - **[Future idea]** Parking-location auto-pin on Bluetooth disconnect.
@@ -1959,7 +2135,7 @@ Roughly in order (adapts the spec §11 build order to where we are):
 7. **`AppleMapProvider` + Settings toggle** — second provider, persisted choice.
 
 Map-feature sub-track (independent of the above ordering; **M1 + M2 + M3 + M4.1 +
-M4.2 + M4.3 + M4.4 committed; M4.5 in the working tree**):
+M4.2 + M4.3 + M4.4 + M4.5 committed; M4.6 in the working tree**):
 - **M1 [done]** — widen the rendering boundary for overlays / events / modes
   (§5 item 24).
 - **M2 [done, device-verified for autocomplete]** — `PlaceSearchService` + Google
@@ -1989,17 +2165,22 @@ M4.2 + M4.3 + M4.4 committed; M4.5 in the working tree**):
   `RouteInfo`, `RouteInfoPanelView`, `NavigationViewModel.routeInfo(now:)`, the
   `ContentView` bottom panel, plus the camera-anchor / route-clip / preview-row
   polish. §5 item 30.
-- **M4.5 [code done, unit-tested (+27); not committed; installed on the iPad,
-  visual + gesture check pending]** — `RouteService.routes(...) -> [Route]` +
+- **M4.5 [done, committed `678e478`]** — `RouteService.routes(...) -> [Route]` +
   `computeAlternativeRoutes`, `RouteOptions`, `RouteViewModel` (`loaded(RouteOptions)`
   + manual `refresh`), `MapViewModel.setRouteOptions` / `selectRouteOption`,
   `MapPolyline.role`, `MapEvent.tappedRoute`, `NavigationViewModel.reroute`,
   `RouteOptionsPanelView`, the maneuver-card Refresh button. §5 item 31.
-  **Selection + refresh only** — no traffic, no polling, no off-route / auto
-  rerouting.
-- **M4.6+** — off-route detection + automatic rerouting, a **traffic-aware** ETA
-  (`TRAFFIC_AWARE`); then heading smoothing, voice guidance, and the POI-tap →
-  destination path.
+- **M4.6 [code done, unit-tested (+38); not committed; 2026-09-03 refinement
+  folded in]** — pure `OffRouteDetector` (onRoute / possiblyOffRoute /
+  confirmedOffRoute, thresholds **20 / 35 / 3**, hysteresis, consecutive-fix
+  confirmation, re-signal), `NavigationViewModel` off-route signal + detector
+  re-arm, `RouteViewModel.autoReroute` (current origin, shared `refresh`
+  field/task, `@Published refreshWasAutomatic` + `isAutomaticallyRecalculating`,
+  25 s cooldown), `ContentView` auto-reroute + recommended-route adoption +
+  synchronously-shown "Recalculating…" pill. §5 item 32.
+  **Detection + auto-reroute only** — no traffic, no polling, no voice.
+- **M4.7+** — a **traffic-aware** ETA (`TRAFFIC_AWARE`); then heading smoothing,
+  voice guidance, and the POI-tap → destination path.
 8. **Polish pass** — `ThemeManager`, idle-timer disable, hide iPadOS chrome,
    favourites dock, landscape-primary orientation config.
 
@@ -2084,15 +2265,17 @@ manual "Refresh Route" is one more request; there is no polling. Still
   (the Google impl already does this). Comfortably free at single-user volume.
 - Places **Details (New)**: billed per field group; one call per chosen
   destination — negligible at this volume.
-- **Routes API "Compute Routes"** (M3–M4.5): billed **per request**.
+- **Routes API "Compute Routes"** (M3–M4.6): billed **per request**.
   `RouteViewModel` fires one request per destination selection / Retry, plus at
-  most one manual **Refresh Route** (M4.5) — no timer, no re-request on a new
-  fix; `startNavigation()` reuses the already-loaded route.
-  `computeAlternativeRoutes` returns the alternatives in that same one request.
-  `TRAFFIC_UNAWARE` keeps traffic pricing off; the field mask adds
-  `routes.legs.steps.*` (→ "Advanced" SKU). ~60–90 trips/month (× ≤ 2 requests)
-  is within the monthly free allowance. Off-route detection / automatic
-  re-routing is explicitly M4.6+.
+  most one manual **Refresh Route** (M4.5), plus an **automatic off-route
+  reroute** (M4.6) — the latter is gated by a 25 s cooldown, so a badly
+  off-route drive costs at most ~1 extra request every 25 s (typically 1–2 for a
+  whole trip); there is still **no timer / polling**. `startNavigation()` reuses
+  the already-loaded route. `computeAlternativeRoutes` returns the alternatives
+  in that same one request. `TRAFFIC_UNAWARE` keeps traffic pricing off; the
+  field mask adds `routes.legs.steps.*` (→ "Advanced" SKU). ~60–90 trips/month
+  is within the monthly free allowance. Traffic-aware ETA / voice guidance are
+  still later work.
 
 ### Signing / distribution
 
@@ -2115,7 +2298,8 @@ Git history on `main` (newest first):
 
 | Commit | Milestone |
 |---|---|
-| *(working tree, uncommitted)* | **Map "M4.5": multiple route options + manual route refresh** (selection + refresh only — **no** traffic-aware routing, traffic-coloured polylines, polling, off-route detection, automatic rerouting, voice, or dashboard work). **`RouteService.routes(from:to:) → [Route]`** — `GoogleRouteService` adds `computeAlternativeRoutes: true` (still `TRAFFIC_UNAWARE`), `parseRoutes` maps every route in response order keyed `"route-<index>"`, dropping unusable ones; Google DTOs stay in-file; `Route` gains a stable `id`. New SDK-neutral **`RouteOptions`** (routes + `selectedID` + `summaries` with a "Recommended / N min faster / N min longer / Similar time" label). `RouteViewModel.state` carries `loaded(RouteOptions)`; a **separate `refresh` field** (`none` / `recalculating` / `options` / `noCurrentLocation` / `failed`) drives a manual **Refresh Route** from the *current* location + remembered destination without disturbing the active route. **`MapViewModel` owns selection + rendering**: `setRouteOptions` / `selectRouteOption` pick the active `route`; `rebuildRoutePolylines` draws the selected route `.selected` (clipped while navigating) + the rest `.alternative` with stable ids (no stale line); preview select re-fits the camera and **does not start navigation**; nav-refresh adopt swaps the route + resets `navigationProgress` + keeps the vehicle indicator + doesn't restart the session + only moves the camera if follow is on. **`MapEvent.tappedRoute(id:)`** picks an alternative from the map (preview only). **`NavigationViewModel.reroute(to:from:)`** re-seeds progress mid-drive. `MapPolyline` gains `role`; `GoogleMapProvider.syncPolylines` styles by role (`.selected` thick blue z2 / `.alternative` thin grey z1), makes lines tappable, and emits `.tappedRoute`. **`RouteOptionsPanelView`** — a compact chip row (preview selector + nav-refresh selector). No automatic switching on time savings. Tests: new **`RouteOptionsTests` (8)** + `RouteTests` / `NavigationTests` M4.5 cases (+27 total). Build clean (app + device), no warnings; full `DashTests` green (258). Installed on the iPad; visual + gesture check + one live alternatives call pending. §5 item 31. |
+| *(working tree, uncommitted)* | **Map "M4.6": smart off-route detection + automatic rerouting** (2026-09-02; **refined 2026-09-03 after a physical drive**) (detection + auto-reroute only — **no** traffic-aware routing, traffic colours, continuous polling, voice guidance, or dashboard work). New pure **`OffRouteDetector`** (`Routing/`, reuses `RouteGeometry.project`): `record(position:on:)` → `onRoute` / `possiblyOffRoute` / `confirmedOffRoute` behind named conservative thresholds — **`onRouteToleranceMeters` 20 / `offRouteThresholdMeters` 35** hysteresis band **/ `confirmationFixCount` 3** *consecutive meaningful* off-route fixes (one or two noisy fixes never trigger) / `resignalAfterFixes` 8 (tightened from 40 / 70 / 4 — the original felt too slow in the car) — signalling **once per episode**; rejoining ends the episode and re-arms. **`NavigationViewModel`** owns the detector (fed from the existing `update(with:)` fix pump), exposes `offRouteStatus` + `needsAutomaticReroute` (+ `clearRerouteRequest()`), and re-arms it on `start` / `reroute` / `stop`. **`RouteViewModel.autoReroute(from:now:)`** runs through the **same `refresh` field + `refreshTask`** as the M4.5 manual Refresh (never concurrent, never doubled), flagged **`@Published refreshWasAutomatic`**; derived **`isRecalculating` / `isAutomaticallyRecalculating`** flip *synchronously* when the request starts (before the API responds) so the "Recalculating…" pill is visible for the whole request and SwiftUI re-renders on the transition. `canAutoReroute(now:)` gates it on a destination + nothing refreshing + `autoRerouteCooldownSeconds` (25, from the last automatic run's *completion*); the manual Refresh ignores the cooldown and cancels an in-flight auto run; a new destination clears the cooldown. **`ContentView`**: after `navVM.update`, `needsAutomaticReroute` → `clearRerouteRequest()` + `autoReroute(from: currentOrigin)`; on `refresh == .options` with `refreshWasAutomatic`, `adoptAutomaticReroute` = `navVM.reroute` + `mapVM.setRouteOptions` + `selectRouteOption(recommended)` + `setNavigationProgress` + `clearRefresh` — recommended route adopted, progress re-seeded, destination / mode / vehicle / follow / guidance / ETA / route-clip untouched, alternatives kept in `mapVM.routeOptions`; on failure nothing is touched. A small non-blocking **"Recalculating…"** pill (snap-in transition) under the maneuver card; a failed auto-reroute → "Couldn't recalculate — keeping current route". **No `RouteService` / `GoogleRouteService` change.** Tests: **`OffRouteTests` (38)** — detector classification / hysteresis / re-signal / re-arm / the refined thresholds / two-fixes-don't-trigger, `autoReroute` (current origin, success/failure, cooldown, no-concurrency w/ manual, manual-wins), the loading-state transition (synchronous, observable, manual≠automatic, failure copy), `NavigationViewModel` off-route signal, adoption sequence. Build clean (app), no source warnings; full `DashTests` green (**293/293** per `xcresulttool`). Not yet device-verified (a live missed-turn drive is pending). §5 item 32. |
+| `678e478` | **Map "M4.5": multiple route options + manual route refresh** (selection + refresh only — **no** traffic-aware routing, traffic-coloured polylines, polling, off-route detection, automatic rerouting, voice, or dashboard work). **`RouteService.routes(from:to:) → [Route]`** — `GoogleRouteService` adds `computeAlternativeRoutes: true` (still `TRAFFIC_UNAWARE`), `parseRoutes` maps every route in response order keyed `"route-<index>"`, dropping unusable ones; Google DTOs stay in-file; `Route` gains a stable `id`. New SDK-neutral **`RouteOptions`** (routes + `selectedID` + `summaries` with a "Recommended / N min faster / N min longer / Similar time" label). `RouteViewModel.state` carries `loaded(RouteOptions)`; a **separate `refresh` field** (`none` / `recalculating` / `options` / `noCurrentLocation` / `failed`) drives a manual **Refresh Route** from the *current* location + remembered destination without disturbing the active route. **`MapViewModel` owns selection + rendering**: `setRouteOptions` / `selectRouteOption` pick the active `route`; `rebuildRoutePolylines` draws the selected route `.selected` (clipped while navigating) + the rest `.alternative` with stable ids (no stale line); preview select re-fits the camera and **does not start navigation**; nav-refresh adopt swaps the route + resets `navigationProgress` + keeps the vehicle indicator + doesn't restart the session + only moves the camera if follow is on. **`MapEvent.tappedRoute(id:)`** picks an alternative from the map (preview only). **`NavigationViewModel.reroute(to:from:)`** re-seeds progress mid-drive. `MapPolyline` gains `role`; `GoogleMapProvider.syncPolylines` styles by role (`.selected` thick blue z2 / `.alternative` thin grey z1), makes lines tappable, and emits `.tappedRoute`. **`RouteOptionsPanelView`** — a compact chip row (preview selector + nav-refresh selector). No automatic switching on time savings. Tests: new **`RouteOptionsTests` (8)** + `RouteTests` / `NavigationTests` M4.5 cases (+27 total). Build clean (app + device), no warnings; full `DashTests` green (258). Physically verified on the iPad. §5 item 31. |
 | `4697557` | **Map "M4.4": route info & ETA** (display only — **no** new route data, traffic-aware routing, rerouting, off-route detection, alternatives, voice, or dashboard work). A bottom **`RouteInfoPanelView`** shows distance · travel time · arrival time: over the route preview it's the whole-route figures with ETA = now + `Route.duration`; during navigation it swaps to remaining distance (from `NavigationProgress`) · remaining time (**new `NavigationProgress.remainingDuration(along:)` — `route.duration` × distance-fraction-left, no traffic model**) · ETA = now + that. Formatting is pure + SDK-neutral: **`RouteFormat`** (`distance` / `duration`) + **`Duration.inSeconds`** in `Routing/`; the ETA clock string uses **`Date.FormatStyle` with the viewer's locale + time zone** (both injectable for tests — no hardcoded format). **`RouteInfo`** (`.preview(route:)` / `.remaining(route:progress:)`, `Kind` carrying distinct labels) builds the model from the existing `Route` + `NavigationProgress` — no duplicate route maths. **`NavigationViewModel.routeInfo(now:)`** exposes the live info (`nil` inactive / arrived). `ContentView` shows the panel in a bottom `TimelineView(.periodic(by: 30))` (so a stationary preview ETA still ticks; nav also refreshes per fix), above the Start button; the preview panel is plain material ("Distance / Time / Arrival"), the live one blue-accented ("Remaining / Time left / ETA"). Maneuver card / Start button / camera **untouched**. Tests: new **`RouteInfoTests` (17)**. Build clean (app + device), no warnings. **Device-verified** (preview panel, swap to live panel on Start, figures updating with movement). **Polish pass (same working tree):** (1) `MapCameraPlan.navigation` gains `vehicleVerticalAnchor` — the vehicle sits *slightly below* centre (was pushed above; `GoogleMapProvider` turns the anchor into top viewport padding); (2) during navigation the drawn route line is clipped to the road still ahead (`RouteGeometry.remainingPolyline` off `route.polyline` + the M4.3 projection — `Route` never mutated), full route in preview / cruising, cleared on arrival / End; (3) in preview the info panel + Start button share one bottom row (panel flexible/larger, button hugging right). Start / maneuver-card / follow-recenter / user-pan behaviour and `RouteInfo` content unchanged. Tests: +12 (`NavigationTests` `remainingPolyline` + `RemainingRouteRenderTests` + camera-anchor). Full `DashTests` green (231). Installed on the iPad; polish visual check pending. §5 item 30. |
 | `a262a9c` | **Map "M4.3": start navigation & maneuver guidance** (guidance display + camera only — **no** off-route detection, rerouting, alternative routes, traffic switching, voice, lane guidance, ETA, or dashboard work). `Route` gained **`steps: [RouteStep]`** (SDK-neutral `ManeuverType` + instruction + road name + point + step polyline + distance; defaults `[]`). `GoogleRouteService`: field mask adds `routes.legs.steps.*`, private DTOs + the Google `Maneuver` → `ManeuverType` table + an "onto/on/toward" road-name heuristic all stay in-file (step fields = Routes **Advanced** SKU, still free-tier once-per-trip). New pure engine in `Routing/`: **`RouteGeometry`** (haversine / polyline length / point→polyline projection) and **`NavigationProgressCalculator`** — progress is one monotone `traveledMeters` scalar; a fix advances the displayed maneuver **by ≤ 1** and a fix > ~80 m off every step is ignored, so noise never skips a turn. **`NavigationViewModel`** (`@MainActor`, mirrors `RouteViewModel`; `inactive` / `navigating(NavigationProgress)` / `arrived`) builds a **`ManeuverCard`**. **`ManeuverCardView`** (top-of-map, CarPlay-style: arrow + big distance + instruction/road + End) and **`StartNavigationButton`** are presentational; `ContentView` swaps the search + route-status overlay for the card while navigating and wires the fix pump → `navVM.update` → `mapVM.setNavigationProgress`. **`MapViewModel.startNavigation()`** (gated on route + a fix + preview mode) enters `.navigating`; the follow camera keeps M4.2's tilt/below-centre framing and overrides the zoom via pure **`navigationZoom(...)`** — base until ~350 m from a `warrantsCloserView` maneuver, ramping to `+1.5` by ~40 m, **quantised to 0.5 steps**, easing back after; follow-off freezes it; recenter restores nav follow. **No `GoogleMapProvider` change.** Tests: new **`NavigationTests` (+~33)** + `RouteTests` (+4). Build clean (app + device), no warnings; full `DashTests` green (202 / 202). **Physically verified on the iPad** — Start Navigation, maneuver card + live updates, route progress, navigation follow / recenter, dynamic maneuver zoom all work. §5 item 29. |
 | `d8b291e` | **Map "M4.2": camera follow, manual pan/zoom & recenter** (camera framing only — **no** turn-by-turn, maneuvers, ETA, rerouting, voice, navigation UI, or dashboard work). New `@Published MapViewModel.followsVehicle` (on by default): in `.cruising` / `.navigating`, `update(with:)` re-derives the rendered camera each fix only while follow is on; otherwise the `VehicleIndicator` moves under a fixed camera. **`.destinationPreview` is untouched** — still a one-shot `.fit`, no re-frame on a fix, and a pan there does not drop follow. New `recenter()` / `showsRecenterButton`; `setMode` / `setDestination` re-arm follow. New **`MapCameraPlan.navigation(state, pitchDegrees:, focusBelowCentre:)`** — tilted, vehicle-below-centre framing for `.navigating` (constants on `MapViewModel`: pitch 55°, focus 0.28). `GoogleMapProvider`: user-gesture vs programmatic split lives here — `MapEvent.cameraIdle(_, byUserGesture:)` is `true` for **any** user pan/zoom/rotate (no distance/zoom threshold) and `false` for programmatic moves, via a pure `UserGestureLatch` over GMS `willMove(byGesture:)` (latched so a follow animation firing mid-gesture can't mask it); `.navigation` sets `viewingAngle` + bottom `mapView.padding`. New presentational **`RecenterButton`** (SwiftUI, **not** in `GoogleMapProvider`), overlaid by `DashMapView` when `showsRecenterButton`. Tests: **`CameraFollowTests` (20)** + `MapContentTests` (2 renamed/expanded). Build clean, no warnings; `DashTests` green. **Device-verified** (cruising follow, any-size pan/zoom drops follow + shows recenter, recenter restores). *(The first pass used an `isMeaningfulMove` distance threshold; device testing showed small/fast gestures slipping through, so gesture detection was simplified to trust `willMove(byGesture:)` alone.)* §5 item 28. |
@@ -2219,8 +2403,8 @@ Git history on `main` (newest first):
   and the preview bottom row in both orientations. +29 unit tests
   (`RouteInfoTests` + `RouteGeometry.remainingPolyline` + `MapViewModel` route
   clipping + camera anchor).
-- **Map M4.5 — multiple route options + manual refresh — automated only; not yet
-  seen on a screen.** +27 unit tests: `RouteOptions` model (construction /
+- **Map M4.5 — multiple route options + manual refresh — device-verified;
+  committed `678e478`.** +27 unit tests: `RouteOptions` model (construction /
   selection / alternatives / summaries + relative labels), Google multi-route
   parse with stable ids, `computeAlternativeRoutes` in the request body,
   `RouteViewModel` multi-route + single-route fallback + the manual-refresh state
@@ -2231,8 +2415,33 @@ Git history on `main` (newest first):
   selects in preview, ignored while navigating; refresh-during-navigation offers
   without switching, adopting swaps the active route + resets progress + keeps
   the vehicle + removes the old geometry + respects follow-off),
-  `NavigationViewModel.reroute`. **Not seen on a real screen / live API:** does
-  Google actually return alternatives for a real trip; the option chips + polyline
-  emphasis; tap-to-reselect + re-fit; the maneuver-card Refresh + its spinner /
-  no-GPS state; picking a recalculated route mid-drive; the selector's fit in
-  both orientations. Installed on the iPad. Not committed.
+  `NavigationViewModel.reroute`. Physically verified on the iPad.
+- **Map M4.6 — smart off-route detection + automatic rerouting — automated only;
+  partially driven (see refinement).** +38 unit tests (`OffRouteTests`):
+  `OffRouteDetector` classification (on / possibly / confirmed), the hysteresis
+  band, one noisy fix — and two — never triggering, the consecutive-fix
+  confirmation, re-signalling a still-off episode, rejoin-then-re-arm, `reset()`,
+  a degenerate route, **the refined thresholds** (20 / 35 / 3 asserted, ~25 m
+  drift = "possibly", ~40 m deviation confirms on the third fix);
+  `RouteViewModel.autoReroute` (current origin + remembered destination,
+  offer-with-`refreshWasAutomatic` while `state` is untouched, failure keeps
+  `state` + arms the cooldown, no destination / no fix → no request, no
+  concurrent auto reroutes, refused while a manual refresh runs, a manual refresh
+  interrupts an in-flight auto run, cooldown blocks until it elapses, manual
+  Refresh ignores the cooldown, a new destination clears it); **the loading
+  state** (`isAutomaticallyRecalculating` set synchronously before the API
+  responds, `objectWillChange` fires, manual ≠ automatic, failure drops the
+  loading state but keeps the failure copy, `clearRefresh` ends it);
+  `NavigationViewModel` off-route signal (quiet on route, quiet on one wild fix,
+  raises once on a sustained deviation, re-arm on `reroute` / `stop`, inert while
+  inactive); the adoption sequence (session / mode / destination / vehicle
+  preserved, progress re-seeded, alternatives kept, old geometry gone).
+  **Refinement (2026-09-03) after a physical automatic-reroute test:** the
+  driver reported (1) the "Recalculating…" pill was not visible during the
+  request and (2) the thresholds felt too large. Fixed: `refreshWasAutomatic`
+  made `@Published` + derived `isAutomaticallyRecalculating` set the instant the
+  request starts (pill now snap-in, visible for the whole request), and
+  thresholds tightened to 20 / 35 / 3. **Still not driven:** the tightened
+  thresholds on a real missed turn; the pill on a real screen; a live
+  `computeRoutes` reroute mid-drive; the recommended-route swap while following.
+  Working tree — not committed.

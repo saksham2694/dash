@@ -41,7 +41,15 @@ struct ContentView: View {
     }
 
     private var isRefreshingRoute: Bool {
-        routeViewModel.refresh == .recalculating
+        routeViewModel.isRecalculating
+    }
+
+    /// An automatic off-route reroute is in flight (M4.6) — drives the small
+    /// "Recalculating…" pill, distinct from the driver's manual Refresh. Sourced
+    /// from `RouteViewModel` so the pill appears the instant `autoReroute` starts
+    /// the request, before the API responds.
+    private var isAutomaticallyRerouting: Bool {
+        routeViewModel.isAutomaticallyRecalculating
     }
 
     /// A freshly recalculated set of routes awaiting the driver's choice (M4.5).
@@ -50,11 +58,15 @@ struct ContentView: View {
         return nil
     }
 
-    /// Short status line for a refresh that couldn't run / failed.
+    /// Short status line for a refresh that couldn't run / failed. An automatic
+    /// reroute that fails keeps the current route (M4.6), so the copy differs.
     private var refreshStatusText: String? {
         switch routeViewModel.refresh {
         case .noCurrentLocation: return "Can't refresh — waiting for GPS"
-        case .failed: return "Couldn't refresh the route"
+        case .failed:
+            return routeViewModel.refreshWasAutomatic
+                ? "Couldn't recalculate — keeping current route"
+                : "Couldn't refresh the route"
         default: return nil
         }
     }
@@ -77,6 +89,10 @@ struct ContentView: View {
                 }
                 searchViewModel.origin = coordinate
                 navigationViewModel.update(with: coordinate)
+                if navigationViewModel.needsAutomaticReroute {
+                    navigationViewModel.clearRerouteRequest()
+                    routeViewModel.autoReroute(from: currentOrigin)
+                }
                 mapViewModel.setNavigationProgress(navigationViewModel.progress)
             }
             .onChange(of: destinationStore.destination) { _, destination in
@@ -92,9 +108,14 @@ struct ContentView: View {
                 }
             }
             .onChange(of: routeViewModel.refresh) { _, refresh in
-                // Draw a freshly recalculated set as selectable alternatives —
-                // in navigation this leaves the active route alone (M4.5).
-                if case .options(let options) = refresh {
+                guard case .options(let options) = refresh else { return }
+                if routeViewModel.refreshWasAutomatic {
+                    // Off-route reroute (M4.6): adopt the recommended route now.
+                    adoptAutomaticReroute(options)
+                } else {
+                    // Manual refresh: draw the recalculated set as selectable
+                    // alternatives — in navigation this leaves the active route
+                    // alone (M4.5).
                     mapViewModel.setRouteOptions(options)
                 }
             }
@@ -162,17 +183,25 @@ struct ContentView: View {
                     ManeuverCardView(
                         card: card,
                         onEnd: { endNavigation() },
-                        onRefresh: refreshedOptions == nil ? { refreshRoute() } : nil,
+                        onRefresh: (refreshedOptions == nil && !isAutomaticallyRerouting)
+                            ? { refreshRoute() } : nil,
                         isRefreshing: isRefreshingRoute
                     )
                 }
-                if let text = refreshStatusText {
+                if isAutomaticallyRerouting {
+                    recalculatingPill
+                        // Snap in at full opacity so a fast Routes API response
+                        // can't leave it mid-fade; fade out on resolve.
+                        .transition(.asymmetric(insertion: .identity, removal: .opacity))
+                } else if let text = refreshStatusText {
                     refreshStatusPill(text)
+                        .transition(.opacity)
                 }
             }
             .frame(maxWidth: 560)
             .padding(.horizontal, 16)
             .padding(.top, 12)
+            .animation(.easeInOut(duration: 0.15), value: isAutomaticallyRerouting)
             .transition(.move(edge: .top).combined(with: .opacity))
         } else {
             VStack(spacing: 0) {
@@ -192,6 +221,23 @@ struct ContentView: View {
             .padding(.horizontal, 16)
             .padding(.top, 12)
         }
+    }
+
+    /// A lightweight, non-blocking "Recalculating…" indicator shown under the
+    /// maneuver card during an automatic reroute (M4.6). Deliberately small — it
+    /// never covers the map, and the current route / guidance stay on screen.
+    private var recalculatingPill: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("Recalculating…")
+        }
+        .font(.subheadline)
+        .foregroundStyle(Color(uiColor: .label))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
+        .accessibilityLabel("Recalculating route")
     }
 
     private func refreshStatusPill(_ text: String) -> some View {
@@ -245,6 +291,25 @@ struct ContentView: View {
         mapViewModel.selectRouteOption(id)
         mapViewModel.setNavigationProgress(navigationViewModel.progress)
         routeViewModel.clearRefresh()
+    }
+
+    /// Off-route detection confirmed the driver left the route and a fresh set
+    /// came back (M4.6) — adopt the recommended route without tearing down the
+    /// session. Destination, navigation mode and the vehicle indicator are
+    /// untouched; progress re-seeds against the new route; the alternatives stay
+    /// available in `MapViewModel.routeOptions`. On any failure the existing
+    /// session is left intact (this handler only runs for a successful set).
+    private func adoptAutomaticReroute(_ options: RouteOptions) {
+        defer { routeViewModel.clearRefresh() }
+        guard isNavigating,
+              let origin = currentOrigin,
+              !options.recommended.steps.isEmpty else { return }
+
+        let recommended = options.recommended
+        navigationViewModel.reroute(to: recommended, from: origin)
+        mapViewModel.setRouteOptions(options)
+        mapViewModel.selectRouteOption(recommended.id)
+        mapViewModel.setNavigationProgress(navigationViewModel.progress)
     }
 
     /// The driver dismissed the recalculated routes — keep the current one.
