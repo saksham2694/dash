@@ -7,10 +7,11 @@
 //  response into this at the boundary, exactly as `Destination` sits in front of
 //  the Places SDK and `MapContent` in front of the renderer.
 //
-//  Deliberately minimal: geometry is all M3 needs to draw the route. `distance`
-//  and `duration` are kept because they fall straight out of the same response
-//  and the guidance / trip layers (M4+) will want them — they are NOT a visible
-//  navigation UI feature in M3.
+//  M3 needed only geometry to draw the route. M4.3 adds `steps` — the ordered
+//  maneuvers for turn-by-turn guidance — populated by the provider from the same
+//  response. `steps` is empty for a route computed without step data (older
+//  callers, canned test fixtures); the overview `polyline` is always present.
+//  `distance` / `duration` fall straight out of the same response.
 //
 
 import Foundation
@@ -28,9 +29,20 @@ nonisolated struct Route: Equatable, Sendable {
     /// Estimated driving time for the route. `.zero` when the provider omits it.
     var duration: Duration
 
-    init(polyline: [MapCoordinate], distanceMeters: Double, duration: Duration) {
+    /// Ordered maneuvers from origin to destination (M4.3). Empty when the route
+    /// was computed without step data. The guidance engine and maneuver card
+    /// read this; the drawn polyline stays `polyline`.
+    var steps: [RouteStep]
+
+    init(
+        polyline: [MapCoordinate],
+        distanceMeters: Double,
+        duration: Duration,
+        steps: [RouteStep] = []
+    ) {
         self.polyline = polyline
         self.distanceMeters = distanceMeters
         self.duration = duration
+        self.steps = steps
     }
 }

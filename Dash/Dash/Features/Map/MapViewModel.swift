@@ -17,6 +17,14 @@
 //  and snaps to the vehicle. `.destinationPreview` is unchanged (M3) — a
 //  one-shot fit, never re-framed by a later fix.
 //
+//  M4.3 adds the navigation session: `startNavigation()` moves from
+//  `.destinationPreview` into `.navigating`, and `setNavigationProgress(_:)`
+//  feeds the live maneuver progress in (computed elsewhere by
+//  `NavigationViewModel`). The navigation camera then zooms in as the vehicle
+//  nears a significant maneuver and eases back out afterwards. Camera framing
+//  only — the maneuver card, the progress engine, and all guidance logic live
+//  outside this type.
+//
 
 import Combine
 import DashShared
@@ -37,6 +45,17 @@ final class MapViewModel: ObservableObject {
     /// viewport below centre so more of the road ahead is visible.
     static let navigationPitchDegrees: Double = 55
     static let navigationFocusBelowCentre: Double = 0.28
+
+    /// Dynamic navigation zoom (M4.3). The camera sits at `navigationBaseZoom`
+    /// while cruising between maneuvers and tightens toward
+    /// `navigationBaseZoom + navigationApproachZoomBoost` as the vehicle comes
+    /// within `navigationApproachMeters` of a significant maneuver, easing back
+    /// out once past it.
+    nonisolated static let navigationBaseZoom: Double = 16
+    nonisolated static let navigationApproachZoomBoost: Double = 1.5
+    nonisolated static let navigationApproachMeters: Double = 350
+    /// Distance at which the zoom-in reaches full boost.
+    nonisolated static let navigationApproachFloorMeters: Double = 40
 
     /// The active backend. Reassign to switch providers (e.g. from Settings);
     /// nothing else in the dashboard changes.
@@ -70,6 +89,15 @@ final class MapViewModel: ObservableObject {
     /// truth; this is set only via `setRoute(_:)`.
     private(set) var route: Route?
 
+    /// Live turn-by-turn progress while `.navigating` (M4.3). Owned by
+    /// `NavigationViewModel`; mirrored here only so the navigation camera can
+    /// zoom toward an upcoming maneuver. `nil` outside a navigation session.
+    private(set) var navigationProgress: NavigationProgress?
+
+    /// Whether at least one real GPS fix has been received. Gates
+    /// `canStartNavigation` — routing to a maneuver needs a starting point.
+    private(set) var hasReceivedFix = false
+
     convenience init() {
         self.init(provider: GoogleMapProvider())
     }
@@ -92,6 +120,7 @@ final class MapViewModel: ObservableObject {
     /// `nil` (no fix yet) leaves everything as-is.
     func update(with packet: LocationPacket?) {
         guard let packet else { return }
+        hasReceivedFix = true
         camera = camera.following(packet)
         content.vehicle = VehicleIndicator(packet)
         if followsVehicle, mode != .destinationPreview {
@@ -105,7 +134,36 @@ final class MapViewModel: ObservableObject {
         guard newMode != mode else { return }
         mode = newMode
         followsVehicle = true
+        if newMode != .navigating {
+            navigationProgress = nil
+        }
         content.camera = cameraPlan()
+    }
+
+    /// Enter turn-by-turn navigation from the route preview (M4.3). Requires a
+    /// loaded route and a known current location (`canStartNavigation`); a no-op
+    /// otherwise. Keeps the existing route, resets to the navigation base zoom,
+    /// and switches to the `.navigating` camera.
+    func startNavigation() {
+        guard canStartNavigation else { return }
+        navigationProgress = nil
+        camera.zoom = Self.navigationBaseZoom
+        setMode(.navigating)
+    }
+
+    /// Whether `startNavigation()` will do anything: previewing a destination,
+    /// with a route and a current location. Drives the Start action's presence.
+    var canStartNavigation: Bool {
+        mode == .destinationPreview && route != nil && hasReceivedFix
+    }
+
+    /// Feed in the latest turn-by-turn progress (M4.3). Only meaningful while
+    /// `.navigating`; when following, it re-derives the camera so the zoom
+    /// tracks the distance to the upcoming maneuver.
+    func setNavigationProgress(_ progress: NavigationProgress?) {
+        navigationProgress = progress
+        guard mode == .navigating, followsVehicle else { return }
+        content.camera = followCameraPlan()
     }
 
     /// Re-enable vehicle-follow and snap the camera back to the vehicle now,
@@ -128,6 +186,7 @@ final class MapViewModel: ObservableObject {
     func setDestination(_ destination: Destination?) {
         self.destination = destination
         followsVehicle = true // a deliberate transition re-arms follow (M4.2)
+        navigationProgress = nil // any nav session belonged to the old destination (M4.3)
 
         // Any existing route belongs to the previous destination — drop it until
         // the routing layer computes a new one via `setRoute(_:)`.
@@ -210,16 +269,61 @@ final class MapViewModel: ObservableObject {
 
     /// The vehicle-follow camera for the current mode: a plain centred follow
     /// while cruising, a tilted below-centre navigation framing while navigating.
+    /// While navigating with live progress, the zoom tracks the distance to the
+    /// upcoming significant maneuver (M4.3).
     private func followCameraPlan() -> MapCameraPlan {
         switch mode {
         case .navigating:
             return .navigation(
-                camera,
+                navigationCameraState(),
                 pitchDegrees: Self.navigationPitchDegrees,
                 focusBelowCentre: Self.navigationFocusBelowCentre
             )
         case .cruising, .destinationPreview:
             return .follow(camera)
         }
+    }
+
+    /// The camera position for a `.navigating` follow render: the retained
+    /// follow camera, but with the zoom overridden by the dynamic navigation
+    /// zoom when there is live maneuver progress. With no progress yet it is the
+    /// retained camera unchanged (matching M4.2).
+    private func navigationCameraState() -> MapCameraState {
+        guard let progress = navigationProgress else { return camera }
+
+        var approachingSignificant = false
+        if let steps = route?.steps, steps.indices.contains(progress.stepIndex) {
+            approachingSignificant = steps[progress.stepIndex].maneuver.warrantsCloserView
+        }
+
+        var state = camera
+        state.zoom = Self.navigationZoom(
+            base: Self.navigationBaseZoom,
+            distanceToManeuverMeters: progress.isArrived ? nil : progress.distanceToManeuverMeters,
+            approachingSignificantManeuver: approachingSignificant
+        )
+        return state
+    }
+
+    /// Pure dynamic-zoom curve (M4.3). Sits at `base` until the vehicle is
+    /// within `navigationApproachMeters` of a significant maneuver, then ramps
+    /// linearly to `base + navigationApproachZoomBoost` at
+    /// `navigationApproachFloorMeters`. Quantised to 0.5 steps so the rendered
+    /// zoom changes in a few discrete moves rather than nudging every fix.
+    nonisolated static func navigationZoom(
+        base: Double,
+        distanceToManeuverMeters: Double?,
+        approachingSignificantManeuver: Bool
+    ) -> Double {
+        guard
+            approachingSignificantManeuver,
+            let distance = distanceToManeuverMeters,
+            distance < navigationApproachMeters
+        else { return base }
+
+        let span = navigationApproachMeters - navigationApproachFloorMeters
+        let t = max(0, min(1, (navigationApproachMeters - distance) / span))
+        let raw = base + navigationApproachZoomBoost * t
+        return (raw * 2).rounded() / 2
     }
 }

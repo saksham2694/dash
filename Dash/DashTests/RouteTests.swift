@@ -118,6 +118,10 @@ struct GoogleRouteServiceMappingTests {
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
         #expect(request.value(forHTTPHeaderField: "X-Goog-Api-Key") == "TEST-KEY")
         #expect(request.value(forHTTPHeaderField: "X-Goog-FieldMask") == GoogleRouteService.fieldMask)
+        // M4.3: the field mask must ask for the per-step maneuver data.
+        #expect(GoogleRouteService.fieldMask.contains("routes.legs.steps.navigationInstruction"))
+        #expect(GoogleRouteService.fieldMask.contains("routes.legs.steps.polyline.encodedPolyline"))
+        #expect(GoogleRouteService.fieldMask.contains("routes.legs.steps.startLocation"))
 
         let httpBody = try #require(request.httpBody)
         let body = try #require(
@@ -166,6 +170,75 @@ struct GoogleRouteServiceMappingTests {
         #expect(GoogleRouteService.duration(from: "600s") == .seconds(600))
         #expect(GoogleRouteService.duration(from: "nonsense") == nil)
         #expect(GoogleRouteService.duration(from: nil) == nil)
+    }
+
+    // MARK: - M4.3 step / maneuver parsing
+
+    @Test("parses per-step maneuvers, geometry and road names from the legs")
+    func parsesSteps() throws {
+        let json = Data(#"""
+        {"routes":[{
+          "distanceMeters":1000,"duration":"120s",
+          "polyline":{"encodedPolyline":"_p~iF~ps|U_ulLnnqC_mqNvxq`@"},
+          "legs":[{"steps":[
+            {"distanceMeters":400,"staticDuration":"40s",
+             "startLocation":{"latLng":{"latitude":38.5,"longitude":-120.2}},
+             "endLocation":{"latLng":{"latitude":40.7,"longitude":-120.95}},
+             "polyline":{"encodedPolyline":"_p~iF~ps|U_ulLnnqC"},
+             "navigationInstruction":{"maneuver":"DEPART","instructions":"Head north on Main Street"}},
+            {"distanceMeters":600,"staticDuration":"80s",
+             "startLocation":{"latLng":{"latitude":40.7,"longitude":-120.95}},
+             "endLocation":{"latLng":{"latitude":40.9,"longitude":-121.0}},
+             "polyline":{"encodedPolyline":"_p~iF~ps|U_ulLnnqC"},
+             "navigationInstruction":{"maneuver":"TURN_RIGHT","instructions":"Turn right onto Mahatma Gandhi Road"}}
+          ]}]
+        }]}
+        """#.utf8)
+
+        let route = try GoogleRouteService.parseRoute(from: json)
+        #expect(route.polyline.count == 3) // overview polyline unchanged
+        #expect(route.steps.count == 2)
+
+        #expect(route.steps[0].maneuver == .depart)
+        #expect(route.steps[0].roadName == "Main Street")
+
+        #expect(route.steps[1].maneuver == .turnRight)
+        #expect(route.steps[1].roadName == "Mahatma Gandhi Road")
+        #expect(route.steps[1].distanceMeters == 600)
+        #expect(almostEqual(route.steps[1].maneuverPoint, MapCoordinate(latitude: 40.7, longitude: -120.95)))
+        #expect(route.steps[1].polyline.count >= 2)
+    }
+
+    @Test("a response with no legs still parses to a valid route with no steps")
+    func noStepsIsValid() throws {
+        let json = Data(#"{"routes":[{"distanceMeters":50,"duration":"30s","polyline":{"encodedPolyline":"_p~iF~ps|U_ulLnnqC"}}]}"#.utf8)
+        let route = try GoogleRouteService.parseRoute(from: json)
+        #expect(route.steps.isEmpty)
+        #expect(route.polyline.count == 2)
+    }
+
+    @Test("Google maneuver strings map to the neutral ManeuverType")
+    func maneuverMapping() {
+        #expect(GoogleRouteService.maneuverType(from: "DEPART") == .depart)
+        #expect(GoogleRouteService.maneuverType(from: "TURN_LEFT") == .turnLeft)
+        #expect(GoogleRouteService.maneuverType(from: "TURN_RIGHT") == .turnRight)
+        #expect(GoogleRouteService.maneuverType(from: "TURN_SHARP_LEFT") == .turnSharpLeft)
+        #expect(GoogleRouteService.maneuverType(from: "UTURN_LEFT") == .uTurn)
+        #expect(GoogleRouteService.maneuverType(from: "UTURN_RIGHT") == .uTurn)
+        #expect(GoogleRouteService.maneuverType(from: "ROUNDABOUT_RIGHT") == .roundabout)
+        #expect(GoogleRouteService.maneuverType(from: "MERGE") == .merge)
+        #expect(GoogleRouteService.maneuverType(from: "STRAIGHT") == .straight)
+        #expect(GoogleRouteService.maneuverType(from: "NAME_CHANGE") == .nameChange)
+        #expect(GoogleRouteService.maneuverType(from: "SOMETHING_NEW") == .unknown)
+        #expect(GoogleRouteService.maneuverType(from: nil) == .unknown)
+    }
+
+    @Test("road name is pulled out of the instruction text, best-effort")
+    func roadNameExtraction() {
+        #expect(GoogleRouteService.roadName(from: "Turn right onto MG Road") == "MG Road")
+        #expect(GoogleRouteService.roadName(from: "Continue straight on 5th Avenue") == "5th Avenue")
+        #expect(GoogleRouteService.roadName(from: "Merge onto NH-44 toward Hosur") == "NH-44")
+        #expect(GoogleRouteService.roadName(from: "Make a U-turn") == nil)
     }
 
     @Test("an empty routes array is a no-route failure")

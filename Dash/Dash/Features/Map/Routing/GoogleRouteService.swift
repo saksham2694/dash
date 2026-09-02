@@ -29,9 +29,21 @@ final class GoogleRouteService: RouteService {
     /// `computeRoutes` endpoint. `directions/v2:computeRoutes` is a custom verb.
     nonisolated static let endpoint = URL(string: "https://routes.googleapis.com/directions/v2:computeRoutes")!
 
-    /// Only the fields the app actually reads — keeps the response (and billing
-    /// SKU) minimal.
-    nonisolated static let fieldMask = "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline"
+    /// Only the fields the app actually reads — keeps the response minimal.
+    /// The `routes.legs.steps.*` fields (M4.3) carry the turn-by-turn maneuvers;
+    /// requesting them moves the call to the Routes "Advanced" SKU, still well
+    /// inside the free tier for one user calling once per trip (spec §5).
+    nonisolated static let fieldMask = [
+        "routes.distanceMeters",
+        "routes.duration",
+        "routes.polyline.encodedPolyline",
+        "routes.legs.steps.distanceMeters",
+        "routes.legs.steps.staticDuration",
+        "routes.legs.steps.startLocation",
+        "routes.legs.steps.endLocation",
+        "routes.legs.steps.polyline.encodedPolyline",
+        "routes.legs.steps.navigationInstruction",
+    ].joined(separator: ",")
 
     typealias Fetch = (URLRequest) async throws -> (Data, URLResponse)
 
@@ -121,8 +133,81 @@ final class GoogleRouteService: RouteService {
         return Route(
             polyline: coordinates,
             distanceMeters: first.distanceMeters ?? 0,
-            duration: Self.duration(from: first.duration) ?? .zero
+            duration: Self.duration(from: first.duration) ?? .zero,
+            steps: Self.steps(from: first.legs)
         )
+    }
+
+    /// Translate the Routes API's `legs[].steps[]` into SDK-neutral `RouteStep`s
+    /// (M4.3). Steps with no usable geometry are dropped; the result is `[]` when
+    /// the response carries no step data (still a valid `Route` — the overview
+    /// polyline stands on its own).
+    private nonisolated static func steps(from legs: [ComputeRoutesResponse.LegDTO]?) -> [RouteStep] {
+        guard let legs else { return [] }
+        return legs.flatMap { $0.steps ?? [] }.compactMap(Self.step(from:))
+    }
+
+    private nonisolated static func step(from dto: ComputeRoutesResponse.StepDTO) -> RouteStep? {
+        let start = dto.startLocation?.latLng?.coordinate
+        let end = dto.endLocation?.latLng?.coordinate
+
+        var polyline = dto.polyline?.encodedPolyline.map(GooglePolyline.decode) ?? []
+        if polyline.count < 2 {
+            polyline = [start, end].compactMap { $0 }
+        }
+        guard let maneuverPoint = start ?? polyline.first, polyline.count >= 2 else { return nil }
+
+        let instruction = dto.navigationInstruction?.instructions ?? ""
+        return RouteStep(
+            maneuver: Self.maneuverType(from: dto.navigationInstruction?.maneuver),
+            instruction: instruction,
+            roadName: Self.roadName(from: instruction),
+            maneuverPoint: maneuverPoint,
+            polyline: polyline,
+            distanceMeters: dto.distanceMeters ?? RouteGeometry.length(polyline)
+        )
+    }
+
+    /// Map a Google `Maneuver` enum string onto the SDK-neutral `ManeuverType`.
+    /// This is the one place Google's maneuver vocabulary is known.
+    nonisolated static func maneuverType(from googleManeuver: String?) -> ManeuverType {
+        switch googleManeuver {
+        case "DEPART":              return .depart
+        case "TURN_LEFT":           return .turnLeft
+        case "TURN_RIGHT":          return .turnRight
+        case "TURN_SLIGHT_LEFT":    return .turnSlightLeft
+        case "TURN_SLIGHT_RIGHT":   return .turnSlightRight
+        case "TURN_SHARP_LEFT":     return .turnSharpLeft
+        case "TURN_SHARP_RIGHT":    return .turnSharpRight
+        case "UTURN_LEFT", "UTURN_RIGHT": return .uTurn
+        case "STRAIGHT":            return .straight
+        case "RAMP_LEFT":           return .rampLeft
+        case "RAMP_RIGHT":          return .rampRight
+        case "MERGE":               return .merge
+        case "FORK_LEFT":           return .forkLeft
+        case "FORK_RIGHT":          return .forkRight
+        case "ROUNDABOUT_LEFT", "ROUNDABOUT_RIGHT": return .roundabout
+        case "NAME_CHANGE":         return .nameChange
+        case "FERRY", "FERRY_TRAIN": return .straight
+        default:                    return .unknown
+        }
+    }
+
+    /// Best-effort road name from a Routes instruction string ("Turn right onto
+    /// MG Road" → "MG Road"). Google gives no dedicated field, so this parses the
+    /// text — kept here so the heuristic never leaks into the neutral model.
+    nonisolated static func roadName(from instruction: String) -> String? {
+        for marker in [" onto ", " on to ", " toward ", " on "] {
+            if let range = instruction.range(of: marker, options: [.caseInsensitive, .backwards]) {
+                let tail = instruction[range.upperBound...]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                // Drop a trailing "toward X" clause if one slipped through.
+                let name = tail.components(separatedBy: " toward ").first ?? tail
+                let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+        }
+        return nil
     }
 
     /// Parse a protobuf-style duration string ("600s", "12.5s") into `Duration`.
@@ -143,6 +228,39 @@ private nonisolated struct ComputeRoutesResponse: Decodable {
         var distanceMeters: Double?
         var duration: String?
         var polyline: PolylineDTO?
+        var legs: [LegDTO]?
+    }
+
+    struct LegDTO: Decodable {
+        var steps: [StepDTO]?
+    }
+
+    struct StepDTO: Decodable {
+        var distanceMeters: Double?
+        var staticDuration: String?
+        var polyline: PolylineDTO?
+        var startLocation: LocationDTO?
+        var endLocation: LocationDTO?
+        var navigationInstruction: NavigationInstructionDTO?
+    }
+
+    struct NavigationInstructionDTO: Decodable {
+        var maneuver: String?
+        var instructions: String?
+    }
+
+    struct LocationDTO: Decodable {
+        var latLng: LatLngDTO?
+    }
+
+    struct LatLngDTO: Decodable {
+        var latitude: Double?
+        var longitude: Double?
+
+        var coordinate: MapCoordinate? {
+            guard let latitude, let longitude else { return nil }
+            return MapCoordinate(latitude: latitude, longitude: longitude)
+        }
     }
 
     struct PolylineDTO: Decodable {

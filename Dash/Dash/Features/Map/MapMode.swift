@@ -3,11 +3,12 @@
 //  Dash
 //
 //  What the map is currently for. `MapViewModel` reads this to decide how to
-//  derive the camera (and, later, which overlays to surface). `.cruising` and
-//  `.destinationPreview` (M3) and `.navigating`'s camera framing (M4.2) are
-//  realised; guidance overlays for `.navigating` land in a later task. Nothing
-//  currently drives the app *into* `.navigating` — there is no "start
-//  navigation" UI yet.
+//  derive the camera and which overlays to surface. `.cruising` /
+//  `.destinationPreview` (M3), the `.navigating` camera framing (M4.2), and the
+//  turn-by-turn maneuver card + dynamic navigation zoom (M4.3) are all realised.
+//  `MapViewModel.startNavigation()` drives the app into `.navigating` from the
+//  route preview. Rerouting / off-route detection / voice guidance are out of
+//  scope for M4.3.
 //
 
 import Foundation
