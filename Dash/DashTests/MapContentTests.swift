@@ -62,14 +62,15 @@ struct MapViewModelContentTests {
         )
     }
 
-    @Test("starts cruising with no overlays and a follow camera")
+    @Test("starts cruising with no overlays, a follow camera and a heading-less vehicle")
     func initialState() {
         let vm = MapViewModel()
         #expect(vm.mode == .cruising)
         #expect(vm.content.polylines.isEmpty)
         #expect(vm.content.markers.isEmpty)
         #expect(vm.content.camera == .follow(.default))
-        #expect(vm.content.vehicle == MapCameraState.default.center)
+        #expect(vm.content.vehicle == VehicleIndicator(coordinate: MapCameraState.default.center))
+        #expect(vm.content.vehicle.headingDegrees == nil)
     }
 
     @Test("a fix moves the vehicle and the follow camera together")
@@ -77,10 +78,35 @@ struct MapViewModelContentTests {
         let vm = MapViewModel()
         vm.update(with: packet(latitude: 5, longitude: 6))
 
-        #expect(vm.content.vehicle == MapCoordinate(latitude: 5, longitude: 6))
+        #expect(vm.content.vehicle.coordinate == MapCoordinate(latitude: 5, longitude: 6))
         #expect(vm.content.camera == .follow(vm.camera))
         #expect(vm.camera.latitude == 5)
         #expect(vm.camera.longitude == 6)
+    }
+
+    @Test("a fix with a usable heading orients the vehicle indicator")
+    func fixWithHeadingOrientsVehicle() {
+        let vm = MapViewModel()
+        vm.update(with: packet(latitude: 5, longitude: 6, heading: 137))
+        #expect(vm.content.vehicle.headingDegrees == 137)
+    }
+
+    @Test("a fix with an invalid (negative) heading leaves the vehicle heading-less")
+    func fixWithInvalidHeadingHasNoOrientation() {
+        let vm = MapViewModel()
+        vm.update(with: packet(latitude: 5, longitude: 6, heading: 42)) // usable first
+        vm.update(with: packet(latitude: 5, longitude: 6, heading: -1)) // then invalid
+        #expect(vm.content.vehicle.headingDegrees == nil)
+    }
+
+    @Test("a later fix moves the vehicle indicator to the newest coordinate")
+    func vehicleFollowsLatestCoordinate() {
+        let vm = MapViewModel()
+        vm.update(with: packet(latitude: 1, longitude: 1, heading: 10))
+        vm.update(with: packet(latitude: 2, longitude: 3, heading: 20))
+        #expect(vm.content.vehicle == VehicleIndicator(
+            coordinate: MapCoordinate(latitude: 2, longitude: 3), headingDegrees: 20
+        ))
     }
 
     @Test("update(with: nil) leaves content untouched")
@@ -162,7 +188,7 @@ struct MapViewModelContentTests {
 
         vm.update(with: packet(latitude: 12.5, longitude: 77.3))
 
-        #expect(vm.content.vehicle == MapCoordinate(latitude: 12.5, longitude: 77.3))
+        #expect(vm.content.vehicle.coordinate == MapCoordinate(latitude: 12.5, longitude: 77.3))
         #expect(vm.content.camera == framed)
     }
 

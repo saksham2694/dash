@@ -7,9 +7,10 @@
 //  the provider can diff successive renders and move / reuse its own objects
 //  rather than tear them down and rebuild.
 //
-//  The vehicle marker is deliberately NOT modelled here — it is an intrinsic part
-//  of every map render and lives in `MapContent.vehicle`, driven straight from the
-//  location pipeline.
+//  The current-location / vehicle indicator is deliberately NOT modelled here —
+//  it is an intrinsic part of every map render, there is exactly one, and it has
+//  its own navigation-style presentation. It lives in `MapContent.vehicle` as a
+//  `VehicleIndicator`, driven straight from the location pipeline.
 //
 
 import Foundation

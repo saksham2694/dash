@@ -445,7 +445,7 @@ struct MapViewModelRouteTests {
 
         vm.update(with: packet(12.5, 77.3))
 
-        #expect(vm.content.vehicle == MapCoordinate(latitude: 12.5, longitude: 77.3))
+        #expect(vm.content.vehicle.coordinate == MapCoordinate(latitude: 12.5, longitude: 77.3))
         #expect(vm.content.camera == framed)
     }
 

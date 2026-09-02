@@ -6,12 +6,14 @@
 //
 //  This is the ONLY file in Dash that imports GoogleMaps. Every GMS type stays
 //  private to this file; the rest of the app sees only the SDK-neutral map types
-//  (`MapContent`, `MapCameraPlan`, `MapPolyline`, `MapMarker`, `MapEvent`, …).
+//  (`MapContent`, `MapCameraPlan`, `MapPolyline`, `MapMarker`, `VehicleIndicator`,
+//  `MapEvent`, …).
 //
 
 import CoreLocation
 import GoogleMaps
 import SwiftUI
+import UIKit
 
 struct GoogleMapProvider: MapProvider {
 
@@ -22,6 +24,22 @@ struct GoogleMapProvider: MapProvider {
         onEvent: @escaping (MapEvent) -> Void
     ) -> AnyView {
         AnyView(GoogleMapContainer(content: content, onEvent: onEvent))
+    }
+
+    /// How to draw the current-location indicator (M4.1). Pure and SDK-free so it
+    /// can be unit-tested without a `GMSMapView`: a plain location dot when the
+    /// fix carries no usable heading, or a pointer rotated to the bearing when it
+    /// does. Never styled like a destination `MapMarker`.
+    nonisolated enum VehicleStyle: Equatable {
+        case locationDot
+        case directionalPointer(rotationDegrees: Double)
+    }
+
+    nonisolated static func vehicleStyle(for vehicle: VehicleIndicator) -> VehicleStyle {
+        if let heading = vehicle.headingDegrees {
+            return .directionalPointer(rotationDegrees: heading)
+        }
+        return .locationDot
     }
 }
 
@@ -42,11 +60,14 @@ private struct GoogleMapContainer: UIViewRepresentable {
         mapView.isMyLocationEnabled = false
         mapView.delegate = context.coordinator
 
+        // The current-location / vehicle indicator (M4.1). Flat so its rotation
+        // tracks the true bearing as the map rotates under it; not tappable; no
+        // callout. Its icon + rotation are set by `syncVehicle(_:on:)`.
         let marker = GMSMarker()
-        marker.title = "Vehicle"
-        // Keep the marker upright while the map rotates under it.
-        marker.rotation = 0
+        marker.isFlat = true
+        marker.groundAnchor = CGPoint(x: 0.5, y: 0.5)
         marker.isTappable = false
+        marker.zIndex = 1 // sit on top of the route polyline
         marker.map = mapView
         context.coordinator.vehicleMarker = marker
 
@@ -86,7 +107,7 @@ private struct GoogleMapContainer: UIViewRepresentable {
                 applyCamera(content.camera, to: mapView, animated: animated)
             }
             if previous?.vehicle != content.vehicle {
-                vehicleMarker?.position = Self.coordinate(content.vehicle)
+                syncVehicle(content.vehicle, on: mapView)
             }
             if previous?.polylines != content.polylines {
                 syncPolylines(content.polylines, on: mapView)
@@ -173,6 +194,60 @@ private struct GoogleMapContainer: UIViewRepresentable {
                 pins[id] = nil
             }
         }
+
+        /// Move + restyle the single current-location indicator (M4.1). Reuses
+        /// the one marker created in `makeUIView` — never recreated.
+        private func syncVehicle(_ vehicle: VehicleIndicator, on mapView: GMSMapView) {
+            guard let marker = vehicleMarker else { return }
+            marker.position = Self.coordinate(vehicle.coordinate)
+            switch GoogleMapProvider.vehicleStyle(for: vehicle) {
+            case .locationDot:
+                marker.icon = Self.locationDotImage
+                marker.rotation = 0
+            case .directionalPointer(let rotationDegrees):
+                marker.icon = Self.directionalPointerImage
+                marker.rotation = rotationDegrees
+            }
+        }
+
+        // MARK: - Vehicle-indicator icons (drawn once, then cached)
+
+        /// A blue "you are here" dot with a white ring — shown when no usable
+        /// heading is available. Distinct from the red destination pin.
+        private static let locationDotImage: UIImage = {
+            let side: CGFloat = 24
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+            return renderer.image { context in
+                let cg = context.cgContext
+                let ring = CGRect(x: 1, y: 1, width: side - 2, height: side - 2)
+                cg.setShadow(offset: CGSize(width: 0, height: 1), blur: 2, color: UIColor.black.withAlphaComponent(0.3).cgColor)
+                UIColor.white.setFill()
+                cg.fillEllipse(in: ring)
+                UIColor.systemBlue.setFill()
+                cg.fillEllipse(in: ring.insetBy(dx: 3, dy: 3))
+            }
+        }()
+
+        /// A blue arrowhead pointing "up" at rotation 0 (i.e. toward heading 0 /
+        /// true north). `syncVehicle` sets `marker.rotation` to the bearing.
+        private static let directionalPointerImage: UIImage = {
+            let side: CGFloat = 32
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+            return renderer.image { context in
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: side / 2, y: 3))               // tip
+                path.addLine(to: CGPoint(x: side - 5, y: side - 4))     // bottom-right
+                path.addLine(to: CGPoint(x: side / 2, y: side - 10))    // tail notch
+                path.addLine(to: CGPoint(x: 5, y: side - 4))            // bottom-left
+                path.close()
+                path.lineJoinStyle = .round
+                path.lineWidth = 3
+                UIColor.systemBlue.setFill()
+                path.fill()
+                UIColor.white.setStroke()
+                path.stroke()
+            }
+        }()
 
         // MARK: - GMSMapViewDelegate
 

@@ -61,18 +61,20 @@ final class MapViewModel: ObservableObject {
         self.camera = .default
         self.content = MapContent(
             camera: .follow(.default),
-            vehicle: MapCameraState.default.center
+            vehicle: VehicleIndicator(coordinate: MapCameraState.default.center)
         )
     }
 
     /// Feed in the latest known location. The caller owns `LocationStore`; this
-    /// re-centres the follow camera and moves the vehicle. `nil` (no fix yet)
-    /// leaves everything as-is. While previewing a destination the camera is left
-    /// framed on the preview — only the vehicle marker moves.
+    /// moves the vehicle indicator (position + heading) and re-centres the
+    /// retained follow camera. `nil` (no fix yet) leaves everything as-is. While
+    /// previewing a destination the rendered camera is left framed on the
+    /// preview — only the vehicle indicator moves. Camera-follow behaviour is
+    /// unchanged from M1; M4.1 only touches the indicator.
     func update(with packet: LocationPacket?) {
         guard let packet else { return }
         camera = camera.following(packet)
-        content.vehicle = MapCoordinate(latitude: packet.latitude, longitude: packet.longitude)
+        content.vehicle = VehicleIndicator(packet)
         if mode != .destinationPreview {
             content.camera = .follow(camera)
         }
@@ -156,7 +158,7 @@ final class MapViewModel: ObservableObject {
             return .follow(camera)
         case .destinationPreview:
             guard let destination else { return .follow(camera) }
-            var points = [content.vehicle, destination.coordinate]
+            var points = [content.vehicle.coordinate, destination.coordinate]
             points.append(contentsOf: route?.polyline ?? [])
             guard let bounds = MapCoordinateBounds(points) else { return .follow(camera) }
             return .fit(bounds, padding: Self.previewPadding)

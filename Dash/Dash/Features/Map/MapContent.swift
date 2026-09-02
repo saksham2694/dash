@@ -17,10 +17,11 @@ nonisolated struct MapContent: Equatable, Sendable {
     /// Where to place the camera on the next render.
     var camera: MapCameraPlan
 
-    /// Current vehicle position — where the vehicle marker is drawn. Independent
-    /// of `camera` so navigation can offset the camera ahead of the vehicle.
-    /// Starts at `MapCameraState.default.center` until the first fix arrives.
-    var vehicle: MapCoordinate
+    /// The current-location / vehicle indicator — position plus heading (M4.1).
+    /// Independent of `camera` so navigation can later offset the camera ahead of
+    /// the vehicle. Starts at `MapCameraState.default.center` with no heading
+    /// until the first fix arrives. Distinct from `markers` (destination pins).
+    var vehicle: VehicleIndicator
 
     /// Route lines to draw. Empty today; populated once routing lands.
     var polylines: [MapPolyline]
@@ -31,7 +32,7 @@ nonisolated struct MapContent: Equatable, Sendable {
 
     init(
         camera: MapCameraPlan,
-        vehicle: MapCoordinate,
+        vehicle: VehicleIndicator,
         polylines: [MapPolyline] = [],
         markers: [MapMarker] = []
     ) {
