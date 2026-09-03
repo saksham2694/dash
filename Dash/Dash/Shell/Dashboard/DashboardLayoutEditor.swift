@@ -7,12 +7,14 @@
 //  validation — the caller (`DashboardLayoutStore`) validates the result with
 //  `DashboardLayoutValidator` and only then persists.
 //
-//  This is the smallest customization vocabulary M5.4.1 needs:
+//  This is the smallest customization vocabulary the Dashboard editor needs:
 //    • remove a placement by id
 //    • change a placement's size by id
 //    • add a placement to a page
 //    • move a placement (its grid origin) by id  — the clean representation of
-//      "move / reorder"; the actual drag interaction is M5.4.2.
+//      "move / reorder"; the actual drag interaction is a later milestone.
+//    • find the first free grid slot for a new widget (M5.4.2) — so the editor
+//      never asks the user to pick coordinates.
 //
 //  Each transform is total: an id / page that doesn't exist yields the layout
 //  unchanged, so the store can treat "no-op" and "rejected" uniformly.
@@ -58,6 +60,35 @@ nonisolated enum DashboardLayoutEditor {
         var pages = layout.pages
         pages[pageIndex].placements.append(placement)
         return DashboardLayout(pages: pages)
+    }
+
+    /// The first grid position a widget of `size` fits at on the page at
+    /// `pageIndex` — scanned **deterministically from the top-left, left-to-right
+    /// within a row, then down to the next row** — without overlapping an
+    /// existing placement or leaving `grid`. `nil` when there is no room (or
+    /// `size` isn't a widget size, or the page doesn't exist).
+    static func firstFreeOrigin(
+        for size: ComponentSize,
+        onPageAt pageIndex: Int,
+        in layout: DashboardLayout,
+        grid: DashboardGrid
+    ) -> GridPoint? {
+        guard size.isWidget, let page = layout.page(at: pageIndex) else { return nil }
+
+        let span = grid.span(for: size)
+        guard span.columns <= grid.columns, span.rows <= grid.rows else { return nil }
+
+        let occupied = page.placements.map { grid.rect(for: $0) }
+
+        for row in 0 ... (grid.rows - span.rows) {
+            for column in 0 ... (grid.columns - span.columns) {
+                let candidate = GridRect(origin: GridPoint(column: column, row: row), span: span)
+                if occupied.allSatisfy({ !$0.intersects(candidate) }) {
+                    return candidate.origin
+                }
+            }
+        }
+        return nil
     }
 
     // MARK: - Helpers

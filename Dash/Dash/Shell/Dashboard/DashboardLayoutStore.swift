@@ -108,6 +108,35 @@ final class DashboardLayoutStore: ObservableObject {
         return applyIfValid(DashboardLayoutEditor.adding(placement, toPageAt: pageIndex, in: layout))
     }
 
+    /// Outcome of `addWidget` — distinguishes "no room" (a normal, user-facing
+    /// state the editor should explain) from a structural rejection.
+    enum WidgetAddOutcome: Equatable, Sendable {
+        case added(UUID)
+        case noSpace
+        case rejected
+    }
+
+    /// Add a widget for `featureID` at `size`, auto-placing it in the first free
+    /// grid slot (top-left, row by row — see `DashboardLayoutEditor.firstFreeOrigin`).
+    /// The caller never chooses coordinates. Feature-agnostic: `featureID` is
+    /// opaque and the picker is responsible for only offering sizes the feature
+    /// supports.
+    @discardableResult
+    func addWidget(
+        featureID: FeatureID,
+        size: ComponentSize,
+        toPageAt pageIndex: Int = 0
+    ) -> WidgetAddOutcome {
+        guard size.isWidget, layout.pages.indices.contains(pageIndex) else { return .rejected }
+        guard let origin = DashboardLayoutEditor.firstFreeOrigin(
+            for: size, onPageAt: pageIndex, in: layout, grid: grid
+        ) else {
+            return .noSpace
+        }
+        let placement = WidgetPlacement(featureID: featureID, size: size, origin: origin)
+        return addPlacement(placement, toPageAt: pageIndex) ? .added(placement.id) : .rejected
+    }
+
     private func placementExists(_ id: UUID) -> Bool {
         layout.allPlacements.contains { $0.id == id }
     }
