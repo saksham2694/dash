@@ -30,6 +30,11 @@
 //  ghost animates its cell-to-cell snap, and the drag-end settle is one
 //  explicit `withAnimation`.
 //
+//  M5.5.1: colours / radii / spacing / typography now come from `DashTheme`
+//  (`Color.dash*`, `Font.dash*`, `DashMetrics`, `.dashCardSurface()`). Layout,
+//  grid, editing and drag behaviour are unchanged. The invalid drag ghost also
+//  carries an ✗ glyph so "invalid" reads without relying on colour.
+//
 
 import SwiftUI
 
@@ -51,7 +56,7 @@ struct DashboardSpaceView: View {
     /// store is written once, on `end`.
     @State private var interaction: Interaction?
 
-    private static let gap: CGFloat = 12
+    private static let gap: CGFloat = DashMetrics.gridGap
 
     /// The single Dashboard page. Exposed for tests; the shell never has to know
     /// anything about pages.
@@ -62,11 +67,11 @@ struct DashboardSpaceView: View {
             gridBody(geometry: DashboardGridGeometry(grid: grid, canvas: proxy.size, gap: Self.gap))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(16)
+        .padding(DashMetrics.screenInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(Color.dashBackground)
         .overlay(alignment: .topTrailing) {
-            editControls.padding(18)
+            editControls.padding(DashMetrics.spacingMedium)
         }
         .animation(.easeInOut(duration: 0.2), value: editModel.isEditing)
         .sheet(isPresented: $showingPicker) {
@@ -230,15 +235,21 @@ struct DashboardSpaceView: View {
     }
 
     private func pill(text: String, systemImage: String, filled: Bool) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DashMetrics.spacingTight) {
             Image(systemName: systemImage)
             Text(text)
         }
-        .font(.callout.weight(.semibold))
-        .padding(.horizontal, 15)
-        .padding(.vertical, 9)
-        .background(Capsule().fill(filled ? Color.accentColor : Color.white.opacity(0.14)))
-        .foregroundStyle(filled ? Color.white : Color.primary)
+        .font(.dashControl)
+        .padding(.horizontal, DashMetrics.spacingMedium)
+        .padding(.vertical, DashMetrics.spacingSmall)
+        .background(Capsule().fill(filled ? Color.dashAccent : Color.dashCard))
+        .overlay(
+            Capsule().strokeBorder(
+                filled ? Color.clear : Color.dashSeparator,
+                lineWidth: DashMetrics.hairline
+            )
+        )
+        .foregroundStyle(filled ? Color.dashOnAccent : Color.dashTextPrimary)
     }
 
     // MARK: - Alerts
@@ -348,14 +359,22 @@ struct DashboardSpaceView: View {
         if let it = interaction {
             let span = it.kind == .resize ? grid.span(for: it.proposedSize) : grid.span(for: it.startSize)
             let frame = geometry.frame(origin: it.proposedOrigin, span: span)
-            let tint = it.valid ? Color.accentColor : Color.red
+            let tint = it.valid ? Color.dashAccent : Color.dashDanger
 
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: DashMetrics.cardCornerRadius, style: .continuous)
                 .fill(tint.opacity(0.16))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: DashMetrics.cardCornerRadius, style: .continuous)
                         .strokeBorder(tint, style: StrokeStyle(lineWidth: 3, dash: [8, 5]))
                 )
+                .overlay {
+                    // A shape cue so "invalid" reads without relying on colour.
+                    if !it.valid {
+                        Image(systemName: "xmark")
+                            .font(.system(size: DashMetrics.statusGlyph, weight: .semibold))
+                            .foregroundStyle(Color.dashDanger)
+                    }
+                }
                 .frame(width: frame.width, height: frame.height)
                 .offset(x: frame.minX, y: frame.minY)
                 .allowsHitTesting(false)
@@ -367,11 +386,14 @@ struct DashboardSpaceView: View {
     }
 
     private var emptyPage: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "rectangle.dashed").font(.system(size: 40))
-            Text("Nothing on the dashboard yet").font(.callout)
+        VStack(spacing: DashMetrics.spacingSmall) {
+            Image(systemName: "rectangle.dashed")
+                .font(.system(size: DashMetrics.statusGlyph))
+                .foregroundStyle(Color.dashTextTertiary)
+            Text("Nothing on the dashboard yet")
+                .font(.dashControl)
+                .foregroundStyle(Color.dashTextSecondary)
         }
-        .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -442,12 +464,8 @@ struct WidgetHostView: View {
 
     private var styledContent: some View {
         content
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.08))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .dashCardSurface()
+            .contentShape(RoundedRectangle(cornerRadius: DashMetrics.cardCornerRadius, style: .continuous))
     }
 
     // MARK: - Editing chrome
@@ -455,10 +473,10 @@ struct WidgetHostView: View {
     private var editingTile: some View {
         styledContent
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: DashMetrics.cardCornerRadius, style: .continuous)
                     .strokeBorder(
-                        Color.accentColor.opacity(0.9),
-                        style: StrokeStyle(lineWidth: 2, dash: [6, 4])
+                        Color.dashAccent,
+                        style: StrokeStyle(lineWidth: DashMetrics.focusStroke, dash: [6, 4])
                     )
             )
             .opacity(isInteracting ? 0.75 : 0.92)
@@ -485,11 +503,11 @@ struct WidgetHostView: View {
             Image(systemName: "minus.circle.fill")
                 .font(.title2)
                 .symbolRenderingMode(.palette)
-                .foregroundStyle(.white, .red)
-                .background(Circle().fill(.black.opacity(0.35)))
+                .foregroundStyle(Color.dashOnAccent, Color.dashDanger)
+                .background(Circle().fill(Color.dashControlScrim))
         }
         .buttonStyle(.plain)
-        .padding(8)
+        .padding(DashMetrics.overlayControlInset)
         .accessibilityLabel("Remove \(featureTitle) widget")
     }
 
@@ -511,11 +529,11 @@ struct WidgetHostView: View {
             } label: {
                 Image(systemName: "square.resize")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(9)
-                    .background(Circle().fill(.black.opacity(0.55)))
+                    .foregroundStyle(Color.dashTextPrimary)
+                    .padding(DashMetrics.spacingSmall)
+                    .background(Circle().fill(Color.dashControlScrim))
             }
-            .padding(8)
+            .padding(DashMetrics.overlayControlInset)
             .accessibilityLabel("Change \(featureTitle) widget size")
         }
     }
@@ -525,10 +543,10 @@ struct WidgetHostView: View {
         if onResizeGesture != nil, supportedWidgetSizes.count > 1 {
             Image(systemName: "arrow.up.left.and.arrow.down.right")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
-                .padding(8)
-                .background(Circle().fill(.black.opacity(0.6)))
-                .padding(8)
+                .foregroundStyle(Color.dashTextPrimary)
+                .padding(DashMetrics.overlayControlInset)
+                .background(Circle().fill(Color.dashControlScrim))
+                .padding(DashMetrics.overlayControlInset)
                 .contentShape(Circle())
                 .gesture(
                     DragGesture(minimumDistance: 4, coordinateSpace: .global)
@@ -570,14 +588,18 @@ private struct UnresolvedWidgetView: View {
     let placement: WidgetPlacement
 
     var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "exclamationmark.triangle").font(.title3)
-            Text(placement.featureID).font(.subheadline.weight(.medium))
+        VStack(spacing: DashMetrics.spacingTight) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.title3)
+                .foregroundStyle(Color.dashTextSecondary)
+            Text(placement.featureID)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.dashTextPrimary)
             Text("Can't show \(placement.size.rawValue) widget")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.dashCaption)
+                .foregroundStyle(Color.dashTextSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.regularMaterial)
+        .background(Color.dashCard)
     }
 }

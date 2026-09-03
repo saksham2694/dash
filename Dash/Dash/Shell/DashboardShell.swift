@@ -56,13 +56,13 @@ struct DashboardShell: View {
             )
 
             Rectangle()
-                .fill(Color.white.opacity(0.08))
-                .frame(width: 1)
+                .fill(Color.dashSeparator)
+                .frame(width: DashMetrics.hairline)
 
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color.black.ignoresSafeArea())
+        .dashScreenBackground()
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: shell.surface)
         .animation(.easeInOut(duration: 0.2), value: shell.sidebarCollapsed)
@@ -100,13 +100,17 @@ private struct MissingFeatureView: View {
     let onBack: () -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "questionmark.app.dashed").font(.largeTitle)
-            Text("“\(id)” isn’t available").font(.headline)
+        VStack(spacing: DashMetrics.spacingMedium) {
+            Image(systemName: "questionmark.app.dashed")
+                .font(.system(size: DashMetrics.statusGlyph))
+                .foregroundStyle(Color.dashTextSecondary)
+            Text("“\(id)” isn’t available")
+                .font(.dashTitle)
+                .foregroundStyle(Color.dashTextPrimary)
             Button("Back to Home", action: onBack)
                 .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .dashScreenBackground()
     }
 }

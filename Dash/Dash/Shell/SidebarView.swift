@@ -50,8 +50,8 @@ struct SidebarView: View {
             )
 
             Rectangle()
-                .fill(Color.white.opacity(0.12))
-                .frame(height: 1)
+                .fill(Color.dashSeparator)
+                .frame(height: DashMetrics.hairline)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 2)
 
@@ -79,17 +79,20 @@ struct SidebarView: View {
                 Image(systemName: shell.sidebarCollapsed ? "chevron.right" : "chevron.left")
                     .font(.footnote.weight(.semibold))
                     .frame(width: 40, height: 32)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .background(
+                        Color.dashCard,
+                        in: RoundedRectangle(cornerRadius: DashMetrics.controlCornerRadius)
+                    )
             }
             .buttonStyle(.plain)
-            .tint(.primary)
+            .tint(Color.dashTextPrimary)
             .accessibilityLabel(shell.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")
         }
         .padding(.vertical, 18)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, DashMetrics.spacingSmall)
         .frame(width: width)
         .frame(maxHeight: .infinity)
-        .background(Color(white: 0.07).ignoresSafeArea())
+        .background(Color.dashSurface.ignoresSafeArea())
     }
 }
 
@@ -110,7 +113,7 @@ private struct SidebarButton: View {
                     .frame(height: 26)
                 if !collapsed {
                     Text(label)
-                        .font(.caption2.weight(.medium))
+                        .font(.dashLabel)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
@@ -118,10 +121,10 @@ private struct SidebarButton: View {
             .frame(maxWidth: .infinity)
             .frame(height: collapsed ? 52 : 62)
             .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(isSelected ? Color.accentColor.opacity(0.9) : Color.white.opacity(0.06))
+                RoundedRectangle(cornerRadius: DashMetrics.controlCornerRadius)
+                    .fill(isSelected ? Color.dashAccent : Color.dashCard)
             )
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .foregroundStyle(isSelected ? Color.dashOnAccent : Color.dashTextPrimary)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)

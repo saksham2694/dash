@@ -88,7 +88,7 @@ struct HomeSpaceView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.black)
+        .background(Color.dashBackground)
     }
 }
 
@@ -209,7 +209,7 @@ struct HomePageDots: View {
                     onSelect(index)
                 } label: {
                     Circle()
-                        .fill(index == current ? Color.white : Color.white.opacity(0.32))
+                        .fill(index == current ? Color.dashTextPrimary : Color.dashTextTertiary)
                         .frame(width: 7, height: 7)
                         .frame(width: 24, height: 24)
                         .contentShape(Circle())
@@ -224,7 +224,8 @@ struct HomePageDots: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
+        .background(Color.dashSurface.opacity(0.92), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.dashSeparator, lineWidth: DashMetrics.hairline))
         .animation(.easeInOut(duration: 0.2), value: current)
     }
 }

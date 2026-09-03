@@ -47,6 +47,8 @@ struct DashboardWidgetPickerView: View {
                     List(manifests) { manifest in
                         featureSection(manifest)
                     }
+                    .scrollContentBackground(.hidden)
+                    .background(Color.dashBackground)
                 }
             }
             .navigationTitle("Add Widget")
@@ -67,8 +69,8 @@ struct DashboardWidgetPickerView: View {
         Section {
             if sizes.isEmpty {
                 Text("No widget sizes for this feature")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(.dashCaption)
+                    .foregroundStyle(Color.dashTextSecondary)
             } else {
                 ForEach(sizes, id: \.self) { size in
                     Button {
@@ -95,12 +97,13 @@ struct DashboardWidgetPickerView: View {
             SizeSwatch(size: size)
             Text(sizeName(size))
                 .font(.body.weight(.medium))
+                .foregroundStyle(Color.dashTextPrimary)
             Spacer()
             Text(spanText(size))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(.dashCaption)
+                .foregroundStyle(Color.dashTextSecondary)
             Image(systemName: "plus.circle.fill")
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Color.dashAccent)
         }
         .contentShape(Rectangle())
         .accessibilityLabel("Add \(sizeName(size)) widget")
@@ -125,7 +128,7 @@ private struct SizeSwatch: View {
         let span = DashboardGrid.standard.span(for: size)
         let unit: CGFloat = 6
         RoundedRectangle(cornerRadius: 3)
-            .fill(Color.accentColor.opacity(0.85))
+            .fill(Color.dashAccent.opacity(0.85))
             .frame(
                 width: unit * CGFloat(span.columns),
                 height: unit * CGFloat(span.rows)
@@ -133,7 +136,7 @@ private struct SizeSwatch: View {
             .frame(width: unit * 6, height: unit * 4, alignment: .topLeading)
             .overlay(
                 RoundedRectangle(cornerRadius: 3)
-                    .stroke(Color.secondary.opacity(0.35))
+                    .stroke(Color.dashSeparator)
                     .frame(width: unit * 6, height: unit * 4)
             )
     }

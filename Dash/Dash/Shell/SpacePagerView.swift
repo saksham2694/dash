@@ -113,7 +113,7 @@ struct SpacePagerView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(Color.dashBackground)
         .onChange(of: spaceIndex) { _, newValue in
             applyToShell(newValue)
         }
