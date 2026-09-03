@@ -30,6 +30,11 @@ struct DashboardShell: View {
 
     @StateObject private var shell = ShellStore()
 
+    /// The Dashboard's transient edit-mode flag (M5.4.1). Owned here — the shell
+    /// presentation layer — so it survives Home/Dashboard paging and is never a
+    /// navigation concern. Starts in normal mode.
+    @StateObject private var dashboardEdit = DashboardEditModel()
+
     /// The one grid the dashboard lays out on. Swappable in a single place.
     private let grid = DashboardGrid.standard
 
@@ -78,6 +83,7 @@ struct DashboardShell: View {
                 shell: shell,
                 homeLayout: homeLayout,
                 dashboardLayout: layoutStore,
+                dashboardEdit: dashboardEdit,
                 registry: registry,
                 grid: grid,
                 comingSoon: Self.comingSoonApps

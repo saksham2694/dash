@@ -114,7 +114,8 @@ struct DashboardSpaceViewTests {
             defaults: UserDefaults(suiteName: "dash-space-\(UUID().uuidString)")!
         )
         let view = DashboardSpaceView(
-            layoutStore: store, registry: FeatureRegistry.makeDefault(), grid: .standard,
+            layoutStore: store, editModel: DashboardEditModel(),
+            registry: FeatureRegistry.makeDefault(), grid: .standard,
             onOpenFeature: { _ in }
         )
 

@@ -51,8 +51,10 @@ final class DashboardLayoutStore: ObservableObject {
 
     // MARK: - Mutation
 
-    /// Swap in a new layout and persist it. (No editing UI calls this yet in
-    /// M5.2.0 — this is the save path the foundation provides.)
+    /// Swap in a new layout and persist it, unconditionally. The validated
+    /// customization methods below go through here after checking the candidate;
+    /// callers that already hold a trusted layout (tests, `resetToDefault`) use
+    /// it directly.
     func replace(with newLayout: DashboardLayout) {
         layout = newLayout
         persist(newLayout)
@@ -61,6 +63,60 @@ final class DashboardLayoutStore: ObservableObject {
     /// Restore and persist the seed layout.
     func resetToDefault() {
         replace(with: seed)
+    }
+
+    // MARK: - Customization (M5.4.1)
+
+    //  The smallest validated mutation vocabulary a Dashboard editor needs. Each
+    //  builds the candidate layout with a pure `DashboardLayoutEditor` transform,
+    //  checks it with `DashboardLayoutValidator` (the same structural gate
+    //  `loadValid` uses), and only then persists via `replace(with:)`.
+    //
+    //  Returns `true` when the change was applied + persisted; `false` — leaving
+    //  the stored layout untouched — when the target doesn't exist or the result
+    //  would be structurally invalid (overlap / out-of-bounds / duplicate id /
+    //  non-widget size). Feature-aware checks (unknown feature / unsupported
+    //  size) belong to the caller, which has the `FeatureRegistry`.
+
+    /// Remove the placement with `id`. No-op (`false`) if no placement matches.
+    @discardableResult
+    func removePlacement(id: UUID) -> Bool {
+        guard placementExists(id) else { return false }
+        return applyIfValid(DashboardLayoutEditor.removing(placementID: id, from: layout))
+    }
+
+    /// Change the `size` of the placement with `id`.
+    @discardableResult
+    func updatePlacementSize(id: UUID, to size: ComponentSize) -> Bool {
+        guard placementExists(id) else { return false }
+        return applyIfValid(DashboardLayoutEditor.settingSize(of: id, to: size, in: layout))
+    }
+
+    /// Move the placement with `id` to a new grid `origin` (the clean
+    /// representation of "move / reorder"; drag interaction is M5.4.2).
+    @discardableResult
+    func movePlacement(id: UUID, to origin: GridPoint) -> Bool {
+        guard placementExists(id) else { return false }
+        return applyIfValid(DashboardLayoutEditor.moving(placementID: id, to: origin, in: layout))
+    }
+
+    /// Add `placement` to the page at `pageIndex` (default: the single Dashboard
+    /// page). `false` if the page is out of range or the result is invalid.
+    @discardableResult
+    func addPlacement(_ placement: WidgetPlacement, toPageAt pageIndex: Int = 0) -> Bool {
+        guard layout.pages.indices.contains(pageIndex) else { return false }
+        return applyIfValid(DashboardLayoutEditor.adding(placement, toPageAt: pageIndex, in: layout))
+    }
+
+    private func placementExists(_ id: UUID) -> Bool {
+        layout.allPlacements.contains { $0.id == id }
+    }
+
+    /// Persist `candidate` iff it is structurally valid against the grid.
+    private func applyIfValid(_ candidate: DashboardLayout) -> Bool {
+        guard DashboardLayoutValidator.isStructurallyValid(candidate, grid: grid) else { return false }
+        replace(with: candidate)
+        return true
     }
 
     // MARK: - Persistence

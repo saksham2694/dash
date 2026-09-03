@@ -29,6 +29,7 @@ struct SpacePagerView: View {
     @ObservedObject private var shell: ShellStore
     @ObservedObject private var homeLayout: HomeLayoutStore
     @ObservedObject private var dashboardLayout: DashboardLayoutStore
+    @ObservedObject private var dashboardEdit: DashboardEditModel
 
     private let registry: FeatureRegistry
     private let grid: DashboardGrid
@@ -42,6 +43,7 @@ struct SpacePagerView: View {
         shell: ShellStore,
         homeLayout: HomeLayoutStore,
         dashboardLayout: DashboardLayoutStore,
+        dashboardEdit: DashboardEditModel,
         registry: FeatureRegistry,
         grid: DashboardGrid,
         comingSoon: [HomeComingSoonApp] = []
@@ -49,6 +51,7 @@ struct SpacePagerView: View {
         _shell = ObservedObject(wrappedValue: shell)
         _homeLayout = ObservedObject(wrappedValue: homeLayout)
         _dashboardLayout = ObservedObject(wrappedValue: dashboardLayout)
+        _dashboardEdit = ObservedObject(wrappedValue: dashboardEdit)
         self.registry = registry
         self.grid = grid
         self.comingSoon = comingSoon
@@ -83,6 +86,7 @@ struct SpacePagerView: View {
             TabView(selection: $spaceIndex) {
                 DashboardSpaceView(
                     layoutStore: dashboardLayout,
+                    editModel: dashboardEdit,
                     registry: registry,
                     grid: grid,
                     onOpenFeature: { shell.openApp($0) }

@@ -160,6 +160,7 @@ struct HomePagingShellTests {
                 seed: .starter(featureID: "maps"),
                 defaults: UserDefaults(suiteName: "pager-d-\(UUID().uuidString)")!
             ),
+            dashboardEdit: DashboardEditModel(),
             registry: FeatureRegistry.makeDefault(),
             grid: .standard
         )
