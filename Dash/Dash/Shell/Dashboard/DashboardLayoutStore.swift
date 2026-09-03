@@ -92,8 +92,9 @@ final class DashboardLayoutStore: ObservableObject {
         return applyIfValid(DashboardLayoutEditor.settingSize(of: id, to: size, in: layout))
     }
 
-    /// Move the placement with `id` to a new grid `origin` (the clean
-    /// representation of "move / reorder"; drag interaction is M5.4.2).
+    /// Move the placement with `id` to a new grid `origin`. Committed once, when
+    /// a drag interaction ends (M5.4.3); `canMovePlacement` drives the live
+    /// feedback in between without persisting.
     @discardableResult
     func movePlacement(id: UUID, to origin: GridPoint) -> Bool {
         guard placementExists(id) else { return false }
@@ -137,13 +138,38 @@ final class DashboardLayoutStore: ObservableObject {
         return addPlacement(placement, toPageAt: pageIndex) ? .added(placement.id) : .rejected
     }
 
+    // MARK: - Interaction queries (M5.4.3)
+    //
+    //  Non-mutating, non-persisting "would this be valid?" checks. They let a
+    //  drag / resize gesture show live feedback and remember the last valid
+    //  position; the actual commit still goes through `movePlacement` /
+    //  `updatePlacementSize` when the interaction ends.
+
+    /// Whether moving the placement with `id` to `origin` would keep the layout
+    /// structurally valid (in bounds, no overlap). `false` for an unknown id.
+    func canMovePlacement(id: UUID, to origin: GridPoint) -> Bool {
+        guard placementExists(id) else { return false }
+        return isStructurallyValid(DashboardLayoutEditor.moving(placementID: id, to: origin, in: layout))
+    }
+
+    /// Whether resizing the placement with `id` to `size` (origin unchanged)
+    /// would keep the layout structurally valid. `false` for an unknown id.
+    func canResizePlacement(id: UUID, to size: ComponentSize) -> Bool {
+        guard placementExists(id) else { return false }
+        return isStructurallyValid(DashboardLayoutEditor.settingSize(of: id, to: size, in: layout))
+    }
+
     private func placementExists(_ id: UUID) -> Bool {
         layout.allPlacements.contains { $0.id == id }
     }
 
+    private func isStructurallyValid(_ candidate: DashboardLayout) -> Bool {
+        DashboardLayoutValidator.isStructurallyValid(candidate, grid: grid)
+    }
+
     /// Persist `candidate` iff it is structurally valid against the grid.
     private func applyIfValid(_ candidate: DashboardLayout) -> Bool {
-        guard DashboardLayoutValidator.isStructurallyValid(candidate, grid: grid) else { return false }
+        guard isStructurallyValid(candidate) else { return false }
         replace(with: candidate)
         return true
     }

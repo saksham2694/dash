@@ -7,28 +7,28 @@
 //  `FeatureRegistry`, and asks the feature for a size-appropriate component
 //  (`DashFeature.makeComponentView(size:)`).
 //
-//  Replaces `DashboardPlaceholderView`. It knows nothing about `MapViewModel` /
-//  route / navigation — only `WidgetPlacement`, `DashFeature`, `FeatureRegistry`,
-//  and the grid.
+//  It knows nothing about `MapViewModel` / route / navigation — only
+//  `WidgetPlacement`, `DashFeature`, `FeatureRegistry`, and the grid.
 //
-//  M5.3.0: each widget is a button. Tapping it forwards the placement's
-//  `featureID` up through `onOpenFeature` (wired to `ShellStore.openApp` by
-//  `DashboardShell`) — no feature-specific navigation logic here. No editing,
-//  no drag, no resize.
+//  M5.3.0: each widget is a button; tapping forwards its `featureID` up through
+//  `onOpenFeature` (→ `ShellStore.openApp`).
+//  M5.3.1: exactly ONE Dashboard space, no page controls — renders page 0.
+//  M5.4.1: an Edit / Done control toggles `DashboardEditModel`; edit mode
+//  disables tap-to-open.
+//  M5.4.2: "Add Widget" picker (first-fit auto-placement), per-widget Remove
+//  control and size Menu. Every mutation goes through `DashboardLayoutStore`.
+//  M5.4.3: widgets are draggable (snap to grid) and resizable (bottom-trailing
+//  handle steps through the feature's supported `ComponentSize` footprints;
+//  bottom-leading size Menu unchanged) while editing. A live ghost shows where
+//  the widget would land, red when invalid. Interaction state is transient view
+//  state; only the final valid placement is committed — one `DashboardLayoutStore`
+//  write per interaction, never per pixel.
 //
-//  M5.3.1: there is exactly ONE Dashboard space — no Dashboard pages, no page
-//  controls. This renders the first (only) page. `DashboardLayout` keeps a page
-//  model internally for a possible future customisation feature.
-//
-//  M5.4.1: an Edit / Done control toggles `DashboardEditModel`. In edit mode the
-//  widgets show an "editing" border and their tap-to-open action is disabled.
-//
-//  M5.4.2: edit mode is now usable — an "Add Widget" custom picker sheet
-//  (deterministic first-fit auto-placement), a per-widget Remove control, and a
-//  per-widget size Menu. Every mutation goes through `DashboardLayoutStore`
-//  (never a direct `DashboardLayout` edit from the view); a change that doesn't
-//  fit is reported in an alert, not applied. Still no drag / resize gestures and
-//  no final styling — that is M5.4.3.
+//  M5.4.3 polish (device feedback): the move gesture uses `.global` coordinate
+//  space so the live `.offset` can't feed back into `translation` (was causing
+//  the widget to vibrate). No implicit animation tracks the drag — only the
+//  ghost animates its cell-to-cell snap, and the drag-end settle is one
+//  explicit `withAnimation`.
 //
 
 import SwiftUI
@@ -47,6 +47,10 @@ struct DashboardSpaceView: View {
     @State private var showingPicker = false
     @State private var editAlert: EditAlert?
 
+    /// The in-flight drag / resize, if any. Transient — never persisted; the
+    /// store is written once, on `end`.
+    @State private var interaction: Interaction?
+
     private static let gap: CGFloat = 12
 
     /// The single Dashboard page. Exposed for tests; the shell never has to know
@@ -55,7 +59,7 @@ struct DashboardSpaceView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            gridBody(in: proxy.size)
+            gridBody(geometry: DashboardGridGeometry(grid: grid, canvas: proxy.size, gap: Self.gap))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(16)
@@ -103,6 +107,97 @@ struct DashboardSpaceView: View {
         if !layoutStore.updatePlacementSize(id: id, to: size) {
             editAlert = .sizeDoesNotFit
         }
+    }
+
+    /// The feature's supported widget sizes, small→large. Drives the resize
+    /// stepper and the size Menu; unsupported sizes are never offered.
+    private func supportedWidgetSizes(_ featureID: FeatureID) -> [ComponentSize] {
+        guard let manifest = registry.feature(featureID)?.manifest else { return [] }
+        return ComponentSize.widgetSizes.filter { manifest.supportedSizes.contains($0) }
+    }
+
+    // MARK: - Drag to move / resize
+
+    private func handleMove(
+        _ placement: WidgetPlacement,
+        translation: CGSize,
+        ended: Bool,
+        geometry: DashboardGridGeometry
+    ) {
+        let span = grid.span(for: placement.size)
+        // `translation` is a pure one-shot delta from the committed origin (the
+        // drag gesture uses `.global` space, so the live `.offset` never feeds
+        // back into it). No mid-drag layout write moves that reference.
+        let snapped = geometry.proposedOrigin(movingFrom: placement.origin, span: span, by: translation)
+        let valid = layoutStore.canMovePlacement(id: placement.id, to: snapped)
+
+        var state = interaction ?? Interaction(kind: .move, placement: placement)
+        guard state.kind == .move, state.placementID == placement.id else { return }
+        state.translation = translation
+        state.proposedOrigin = snapped
+        state.valid = valid
+        if valid { state.lastValidOrigin = snapped }
+
+        if ended {
+            // One transaction: the committed frame change and the transient
+            // offset returning to zero animate together — they cancel out for a
+            // valid drop landing under the finger, and spring back for an
+            // invalid one. Nothing here is animated *during* the drag.
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                if state.lastValidOrigin != placement.origin {
+                    layoutStore.movePlacement(id: placement.id, to: state.lastValidOrigin)
+                }
+                interaction = nil
+            }
+        } else {
+            interaction = state
+        }
+    }
+
+    private func handleResize(
+        _ placement: WidgetPlacement,
+        translation: CGSize,
+        ended: Bool,
+        geometry: DashboardGridGeometry
+    ) {
+        let sizes = supportedWidgetSizes(placement.featureID)
+        guard sizes.count > 1 else { return }
+
+        let stepDistance = max(24, geometry.cell.width * 0.8)
+        let target = DashboardResizeStepper.targetSize(
+            current: placement.size,
+            supported: sizes,
+            translation: translation,
+            stepDistance: stepDistance
+        )
+        let valid = layoutStore.canResizePlacement(id: placement.id, to: target)
+
+        var state = interaction ?? Interaction(kind: .resize, placement: placement)
+        guard state.kind == .resize, state.placementID == placement.id else { return }
+        state.translation = translation
+        state.proposedSize = target
+        state.valid = valid
+        if valid { state.lastValidSize = target }
+
+        if ended {
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                if state.lastValidSize != placement.size {
+                    if !layoutStore.updatePlacementSize(id: placement.id, to: state.lastValidSize) {
+                        editAlert = .sizeDoesNotFit
+                    }
+                }
+                interaction = nil
+            }
+        } else {
+            interaction = state
+        }
+    }
+
+    /// While `placement` is being moved, the raw finger translation so the tile
+    /// tracks the finger; otherwise `.zero`.
+    private func liveMoveOffset(_ placement: WidgetPlacement) -> CGSize {
+        guard let it = interaction, it.kind == .move, it.placementID == placement.id else { return .zero }
+        return it.translation
     }
 
     // MARK: - Edit / Done / Add
@@ -171,39 +266,104 @@ struct DashboardSpaceView: View {
         }
     }
 
+    // MARK: - Interaction state
+
+    struct Interaction {
+        enum Kind { case move, resize }
+
+        let kind: Kind
+        let placementID: UUID
+        let startOrigin: GridPoint
+        let startSize: ComponentSize
+
+        var translation: CGSize = .zero
+        var proposedOrigin: GridPoint
+        var proposedSize: ComponentSize
+        var lastValidOrigin: GridPoint
+        var lastValidSize: ComponentSize
+        var valid: Bool = true
+
+        init(kind: Kind, placement: WidgetPlacement) {
+            self.kind = kind
+            self.placementID = placement.id
+            self.startOrigin = placement.origin
+            self.startSize = placement.size
+            self.proposedOrigin = placement.origin
+            self.proposedSize = placement.size
+            self.lastValidOrigin = placement.origin
+            self.lastValidSize = placement.size
+        }
+    }
+
     // MARK: - Grid
 
     @ViewBuilder
-    private func gridBody(in size: CGSize) -> some View {
-        let cellW = (size.width - Self.gap * CGFloat(grid.columns - 1)) / CGFloat(max(1, grid.columns))
-        let cellH = (size.height - Self.gap * CGFloat(grid.rows - 1)) / CGFloat(max(1, grid.rows))
-
+    private func gridBody(geometry: DashboardGridGeometry) -> some View {
         ZStack(alignment: .topLeading) {
             if let page, !page.placements.isEmpty {
                 ForEach(page.placements) { placement in
-                    let span = grid.span(for: placement.size)
-                    WidgetHostView(
-                        placement: placement,
-                        registry: registry,
-                        onOpenFeature: onOpenFeature,
-                        isEditing: editModel.isEditing,
-                        onRemove: { removeWidget(placement.id) },
-                        onResize: { resizeWidget(placement.id, to: $0) }
-                    )
-                        .frame(
-                            width: cellW * CGFloat(span.columns) + Self.gap * CGFloat(span.columns - 1),
-                            height: cellH * CGFloat(span.rows) + Self.gap * CGFloat(span.rows - 1)
-                        )
-                        .offset(
-                            x: (cellW + Self.gap) * CGFloat(placement.origin.column),
-                            y: (cellH + Self.gap) * CGFloat(placement.origin.row)
-                        )
+                    widgetTile(placement, geometry: geometry)
                 }
+                dragGhost(geometry: geometry)
             } else {
                 emptyPage
             }
         }
+        // Only the page-swap animates here. The live drag must NOT be animated
+        // implicitly — an ancestor `.animation(value: proposedOrigin)` would ease
+        // the tracked widget on every cell crossing, making it lag the finger.
+        // Drag-end settle is animated explicitly in `handleMove` / `handleResize`;
+        // the ghost animates its own snap in `dragGhost`.
         .animation(.easeInOut(duration: 0.2), value: page?.id)
+    }
+
+    @ViewBuilder
+    private func widgetTile(_ placement: WidgetPlacement, geometry: DashboardGridGeometry) -> some View {
+        let frame = geometry.frame(origin: placement.origin, span: grid.span(for: placement.size))
+        let offset = liveMoveOffset(placement)
+        let editing = editModel.isEditing
+
+        WidgetHostView(
+            placement: placement,
+            registry: registry,
+            onOpenFeature: onOpenFeature,
+            isEditing: editing,
+            isInteracting: interaction?.placementID == placement.id,
+            onRemove: { removeWidget(placement.id) },
+            onResize: { resizeWidget(placement.id, to: $0) },
+            onMoveGesture: editing
+                ? { translation, ended in handleMove(placement, translation: translation, ended: ended, geometry: geometry) }
+                : nil,
+            onResizeGesture: editing
+                ? { translation, ended in handleResize(placement, translation: translation, ended: ended, geometry: geometry) }
+                : nil
+        )
+        .frame(width: frame.width, height: frame.height)
+        .offset(x: frame.minX + offset.width, y: frame.minY + offset.height)
+        .zIndex(interaction?.placementID == placement.id ? 2 : 0)
+    }
+
+    @ViewBuilder
+    private func dragGhost(geometry: DashboardGridGeometry) -> some View {
+        if let it = interaction {
+            let span = it.kind == .resize ? grid.span(for: it.proposedSize) : grid.span(for: it.startSize)
+            let frame = geometry.frame(origin: it.proposedOrigin, span: span)
+            let tint = it.valid ? Color.accentColor : Color.red
+
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(tint.opacity(0.16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(tint, style: StrokeStyle(lineWidth: 3, dash: [8, 5]))
+                )
+                .frame(width: frame.width, height: frame.height)
+                .offset(x: frame.minX, y: frame.minY)
+                .allowsHitTesting(false)
+                .zIndex(1)
+                // The ghost glides between cells; the live widget does not.
+                .animation(.easeOut(duration: 0.12), value: it.proposedOrigin)
+                .animation(.easeOut(duration: 0.12), value: it.proposedSize)
+        }
     }
 
     private var emptyPage: some View {
@@ -216,18 +376,15 @@ struct DashboardSpaceView: View {
     }
 }
 
-/// Frames one placement as a **button**: the feature's component when it
-/// resolves, otherwise a clearly-labelled fallback. Tapping anywhere on the tile
-/// forwards `placement.featureID` to `onOpenFeature` (M5.3.0) — the tile knows
-/// nothing about which feature that is or how it opens.
+/// Frames one placement as a **button** in normal mode: the feature's component
+/// when it resolves, otherwise a clearly-labelled fallback. Tapping forwards
+/// `placement.featureID` to `onOpenFeature` — the tile knows nothing about which
+/// feature that is or how it opens.
 ///
-/// M5.4.1: while `isEditing` the open action is disabled and the tile shows a
-/// dashed "editing" border.
-///
-/// M5.4.2: in edit mode the tile is not a Button at all — instead it carries a
-/// Remove control and a size Menu (only the feature's supported widget sizes).
-/// Both call back to `DashboardSpaceView`, which routes them through
-/// `DashboardLayoutStore`. No drag / resize gestures yet.
+/// In edit mode the tile is not a Button: it carries a Remove control, a size
+/// Menu (only the feature's supported widget sizes), a drag-to-move gesture on
+/// the body, and a corner resize handle. All of them call back to
+/// `DashboardSpaceView`, which routes changes through `DashboardLayoutStore`.
 struct WidgetHostView: View {
 
     let placement: WidgetPlacement
@@ -235,14 +392,25 @@ struct WidgetHostView: View {
     let onOpenFeature: (FeatureID) -> Void
 
     /// Whether the Dashboard is in edit mode. Disables tap-to-open and reveals
-    /// the Remove / resize controls.
+    /// the editing controls.
     var isEditing: Bool = false
+
+    /// Whether this specific tile is the one currently being dragged / resized.
+    var isInteracting: Bool = false
 
     /// Edit-mode: remove this widget (→ `DashboardLayoutStore.removePlacement`).
     var onRemove: (() -> Void)? = nil
 
-    /// Edit-mode: change this widget's size (→ `DashboardLayoutStore.updatePlacementSize`).
+    /// Edit-mode: change this widget's size via the Menu
+    /// (→ `DashboardLayoutStore.updatePlacementSize`).
     var onResize: ((ComponentSize) -> Void)? = nil
+
+    /// Edit-mode: the body was dragged — `(translation, ended)`. The parent snaps
+    /// it to the grid and commits on `ended`.
+    var onMoveGesture: ((CGSize, Bool) -> Void)? = nil
+
+    /// Edit-mode: the resize handle was dragged — `(translation, ended)`.
+    var onResizeGesture: ((CGSize, Bool) -> Void)? = nil
 
     /// The tap action — the tile's whole job in normal mode. A no-op while
     /// editing. Exposed for tests.
@@ -256,7 +424,7 @@ struct WidgetHostView: View {
     }
 
     /// The feature's supported widget sizes, in `compact → large` order. Empty /
-    /// single → no size control. Exposed for tests.
+    /// single → no size control / no resize handle. Exposed for tests.
     var supportedWidgetSizes: [ComponentSize] {
         guard let manifest = registry.feature(placement.featureID)?.manifest else { return [] }
         return ComponentSize.widgetSizes.filter { manifest.supportedSizes.contains($0) }
@@ -293,11 +461,21 @@ struct WidgetHostView: View {
                         style: StrokeStyle(lineWidth: 2, dash: [6, 4])
                     )
             )
-            .opacity(0.9)
+            .opacity(isInteracting ? 0.75 : 0.92)
             .overlay(alignment: .topLeading) { removeControl }
-            .overlay(alignment: .bottomTrailing) { sizeControl }
+            .overlay(alignment: .bottomLeading) { sizeControl }
+            .overlay(alignment: .bottomTrailing) { resizeHandle }
+            .gesture(
+                // `.global` space: `translation` is a pure delta from a fixed
+                // reference, so driving `.offset` from it can't feed back into
+                // the measurement (the cause of the drag vibration).
+                DragGesture(minimumDistance: 8, coordinateSpace: .global)
+                    .onChanged { onMoveGesture?($0.translation, false) }
+                    .onEnded { onMoveGesture?($0.translation, true) }
+            )
             .accessibilityElement(children: .contain)
             .accessibilityLabel("\(featureTitle) widget, editing")
+            .accessibilityHint("Drag to move")
     }
 
     private var removeControl: some View {
@@ -339,6 +517,25 @@ struct WidgetHostView: View {
             }
             .padding(8)
             .accessibilityLabel("Change \(featureTitle) widget size")
+        }
+    }
+
+    @ViewBuilder
+    private var resizeHandle: some View {
+        if onResizeGesture != nil, supportedWidgetSizes.count > 1 {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(8)
+                .background(Circle().fill(.black.opacity(0.6)))
+                .padding(8)
+                .contentShape(Circle())
+                .gesture(
+                    DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                        .onChanged { onResizeGesture?($0.translation, false) }
+                        .onEnded { onResizeGesture?($0.translation, true) }
+                )
+                .accessibilityLabel("Drag to resize \(featureTitle) widget")
         }
     }
 
