@@ -6,11 +6,15 @@
 //  is showing, whether the sidebar is collapsed, and where to return after a
 //  full-screen app closes.
 //
-//  Deliberately pure and feature-agnostic (M5 proposal §2, §9):
+//  Deliberately pure and feature-agnostic:
 //    • No feature-specific logic — `openApp` takes an opaque `FeatureID` and
 //      never validates it against the registry (the shell view does that).
 //    • No SDK types, no networking, no layout.
 //    • `@MainActor` because SwiftUI observes it on the main actor.
+//
+//  M5.3.1: there is one Dashboard (no dashboard pages). `goToPage` only affects
+//  the Home space. Horizontal swiping between Dashboard and Home pages is driven
+//  by the shell's pager calling `showDashboard()` / `showHome(page:)`.
 //
 
 import Combine
@@ -37,24 +41,20 @@ final class ShellStore: ObservableObject {
 
     // MARK: - Spaces
 
-    /// Show the App-Home launcher.
+    /// Show the widget dashboard (the single Dashboard space).
+    func showDashboard() {
+        goToSpace(.dashboard)
+    }
+
+    /// Show the App-Home launcher on `page`.
     func showHome(page: Int = 0) {
         goToSpace(.home(page: page))
     }
 
-    /// Show the widget dashboard.
-    func showDashboard(page: Int = 0) {
-        goToSpace(.dashboard(page: page))
-    }
-
-    /// Change the page within the current space. No-op while a full-screen app
-    /// is open.
+    /// Change the Home page. No-op on the Dashboard (one page) or while a
+    /// full-screen app is open.
     func goToPage(_ page: Int) {
-        switch surface {
-        case .home: showHome(page: page)
-        case .dashboard: showDashboard(page: page)
-        case .app: break
-        }
+        if case .home = surface { showHome(page: page) }
     }
 
     // MARK: - Full-screen apps

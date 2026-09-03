@@ -46,7 +46,9 @@ struct DashApp: App {
         let features = FeatureRegistry.makeDefault()
         _registry = StateObject(wrappedValue: features)
         _dashboardLayout = StateObject(wrappedValue: DashboardLayoutStore(seed: .starter(featureID: MapFeature.id)))
-        _homeLayout = StateObject(wrappedValue: HomeLayoutStore(seed: .starter(featureIDs: features.manifests.map(\.id))))
+        _homeLayout = StateObject(wrappedValue: HomeLayoutStore(
+            seed: .paginate(featureIDs: features.manifests.map(\.id), capacity: HomeGrid.capacity)
+        ))
     }
 
     var body: some Scene {

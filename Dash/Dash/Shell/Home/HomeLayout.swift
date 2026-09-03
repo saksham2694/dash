@@ -17,6 +17,18 @@
 
 import Foundation
 
+/// The launcher's design grid — the capacity that drives Home pagination and
+/// the icon layout. A design constant; not persisted. Icons fill this grid
+/// top-left, left-to-right then top-to-bottom; when it is full, a new Home
+/// page is added.
+nonisolated enum HomeGrid {
+    static let columns = 4
+    static let rows = 4
+
+    /// App icons per Home page.
+    static var capacity: Int { columns * rows }
+}
+
 /// One app tile on a Home page.
 nonisolated struct HomeAppPlacement: Identifiable, Equatable, Sendable, Codable {
 
@@ -79,15 +91,22 @@ nonisolated struct HomeLayout: Equatable, Sendable, Codable {
 
 extension HomeLayout {
 
-    /// The default launcher, **derived from the registered feature ids** (the
-    /// caller passes them so `Shell/` stays feature-agnostic — `DashApp` supplies
-    /// `FeatureRegistry`'s ids). One tile per feature, in registration order,
-    /// filled `appsPerPage` at a time.
-    static func starter(featureIDs: [FeatureID], appsPerPage: Int = 12) -> HomeLayout {
+    /// Paginate a list of feature ids into Home pages, **`capacity` icons per
+    /// page**, filling each page top-left before starting the next. Pure and
+    /// testable. The caller passes the ids so `Shell/` stays feature-agnostic
+    /// (`DashApp` supplies `FeatureRegistry`'s ids and `HomeGrid.capacity`).
+    ///
+    /// No empty pages: an empty id list yields a single empty page; otherwise
+    /// the page count is exactly `ceil(count / capacity)`.
+    ///
+    ///     paginate(5 ids,  capacity: 8) → 1 page
+    ///     paginate(10 ids, capacity: 8) → 2 pages
+    ///     paginate(17 ids, capacity: 8) → 3 pages
+    static func paginate(featureIDs: [FeatureID], capacity: Int = HomeGrid.capacity) -> HomeLayout {
         guard !featureIDs.isEmpty else { return HomeLayout(pages: [HomePage()]) }
 
         let placements = featureIDs.map { HomeAppPlacement(featureID: $0) }
-        let perPage = max(1, appsPerPage)
+        let perPage = max(1, capacity)
         let pages = stride(from: 0, to: placements.count, by: perPage).map { start in
             HomePage(apps: Array(placements[start ..< min(start + perPage, placements.count)]))
         }

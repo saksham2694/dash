@@ -2,97 +2,116 @@
 //  HomeSpaceView.swift
 //  Dash
 //
-//  The App-Home launcher surface (M5.3.0) — replaces `HomePlaceholderView`.
-//  Reads `HomeLayoutStore` for the current page's app placements, resolves each
-//  `featureID` through `FeatureRegistry` for the tile's icon + title, and — when
-//  a tile is tapped — forwards the `featureID` up through `onOpenFeature`
-//  (wired to `ShellStore.openApp` by `DashboardShell`, the same boundary
-//  `DashboardSpaceView` uses).
+//  One page of the App-Home launcher. Renders the icons for a single `HomePage`,
+//  resolving each placement's `featureID` through `FeatureRegistry` for the icon
+//  + title, and — when an icon is tapped — forwards the `featureID` up through
+//  `onOpenFeature` (wired to `ShellStore.openApp` by `DashboardShell`, the same
+//  boundary `DashboardSpaceView` uses).
 //
-//  Completely feature-agnostic: it knows only `HomeAppPlacement`, `FeatureID`,
-//  `FeatureManifest`, and the callbacks. No `ShellStore`, no feature view models.
+//  This view is NOT a pager. Horizontal navigation between the Dashboard and the
+//  Home pages is one shell-level model (`SpacePagerView`); this view is just the
+//  content of a single Home space. Icons start at the TOP-LEFT of the usable
+//  area and fill left-to-right, then top-to-bottom — no centring.
 //
-//  M5.3.0 scope: the paged launcher model + real tappable tiles. No swipe
-//  gesture, no reorder / edit UI, no final icon design.
+//  Feature-agnostic: it knows only `HomePage` / `HomeAppPlacement` / `FeatureID`
+//  / `FeatureManifest` and the open callback. No `ShellStore`, no view models.
 //
 
 import SwiftUI
 
 struct HomeSpaceView: View {
 
-    @ObservedObject var layoutStore: HomeLayoutStore
-    let registry: FeatureRegistry
+    /// The page to render.
+    let page: HomePage
 
-    /// Which page the shell wants shown (`ShellSurface.home(page:)`).
-    let requestedPage: Int
+    private let registry: FeatureRegistry
 
-    /// Ask the shell to move to a page.
-    let onSelectPage: (Int) -> Void
+    /// Ask the shell to open a feature full-screen (an icon was tapped).
+    private let onOpenFeature: (FeatureID) -> Void
 
-    /// Ask the shell to open a feature full-screen (a tile was tapped).
-    let onOpenFeature: (FeatureID) -> Void
+    /// Presentation-only "coming soon" icons — **not** registered features and
+    /// **not** persisted. Supplied by `DashboardShell`; only shown on the last
+    /// Home page.
+    private let comingSoon: [HomeComingSoonApp]
 
-    /// Presentation-only "coming soon" tiles — **not** registered features and
-    /// **not** persisted. Supplied by `DashboardShell` so the grid reads
-    /// correctly while only one real feature exists.
-    var comingSoon: [HomeComingSoonApp] = []
-
-    private static let columns = [GridItem(.adaptive(minimum: 168, maximum: 220), spacing: 20)]
-
-    /// `requestedPage` clamped to the pages that exist. Exposed for tests; the
-    /// shell never has to know the page count.
-    var resolvedPageIndex: Int {
-        layoutStore.layout.clampedPageIndex(requestedPage)
+    init(
+        page: HomePage,
+        registry: FeatureRegistry,
+        comingSoon: [HomeComingSoonApp] = [],
+        onOpenFeature: @escaping (FeatureID) -> Void
+    ) {
+        self.page = page
+        self.registry = registry
+        self.comingSoon = comingSoon
+        self.onOpenFeature = onOpenFeature
     }
 
-    /// The `featureID`s of the tiles on the current page — for tests.
-    var currentPageFeatureIDs: [FeatureID] {
-        (layoutStore.layout.page(at: resolvedPageIndex)?.apps ?? []).map(\.featureID)
-    }
+    // MARK: - Test-facing
 
-    private var pageCount: Int { layoutStore.layout.pageCount }
-    private var isLastPage: Bool { resolvedPageIndex >= pageCount - 1 }
+    /// The `featureID`s of this page's tiles, in slot order (top-left first).
+    var featureIDs: [FeatureID] { page.apps.map(\.featureID) }
+
+    // MARK: - Body
+
+    /// Fixed-width icon columns — `HomeGrid.columns` of them — so icons flow
+    /// left-to-right and wrap to a new row. Not adaptive/centred: the collection
+    /// is anchored to the top-left of the usable area.
+    private var columns: [GridItem] {
+        Array(
+            repeating: GridItem(
+                .fixed(HomeMetrics.slotWidth),
+                spacing: HomeMetrics.columnSpacing,
+                alignment: .top
+            ),
+            count: max(1, HomeGrid.columns)
+        )
+    }
 
     var body: some View {
-        VStack(spacing: 12) {
-            ScrollView {
-                LazyVGrid(columns: Self.columns, spacing: 20) {
-                    ForEach(layoutStore.layout.page(at: resolvedPageIndex)?.apps ?? []) { placement in
-                        HomeAppTileButton(
-                            manifest: registry.feature(placement.featureID)?.manifest,
-                            featureID: placement.featureID,
-                            onOpen: onOpenFeature
-                        )
-                    }
-
-                    if isLastPage {
-                        ForEach(comingSoon) { app in
-                            HomeAppTile(symbol: app.symbolName, title: app.title, comingSoon: true)
-                        }
-                    }
+        ScrollView(.vertical, showsIndicators: false) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: HomeMetrics.rowSpacing) {
+                ForEach(page.apps) { placement in
+                    HomeAppTileButton(
+                        manifest: registry.feature(placement.featureID)?.manifest,
+                        featureID: placement.featureID,
+                        onOpen: onOpenFeature
+                    )
                 }
-                .padding(28)
+                ForEach(comingSoon) { app in
+                    HomeAppIcon(symbol: app.symbolName, title: app.title, dimmed: true)
+                }
             }
-
-            if pageCount > 1 {
-                HomePageControls(current: resolvedPageIndex, count: pageCount, onSelect: onSelectPage)
-            }
+            .padding(.top, HomeMetrics.topPadding)
+            .padding(.leading, HomeMetrics.leadingPadding)
+            .padding(.trailing, HomeMetrics.leadingPadding)
+            .padding(.bottom, HomeMetrics.bottomPadding)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.black)
     }
 }
 
-/// A presentation-only tile for an app that isn't built yet.
-struct HomeComingSoonApp: Identifiable, Equatable, Sendable {
-    let id = UUID()
-    let title: String
-    let symbolName: String
+// MARK: - Metrics
+
+private enum HomeMetrics {
+    static let iconSize: CGFloat = 84
+    static let iconCorner: CGFloat = 20
+    static let glyphSize: CGFloat = 38
+    static let labelSpacing: CGFloat = 10
+    /// One icon + its label, with breathing room — the grid's fixed cell width.
+    static let slotWidth: CGFloat = 128
+    static let columnSpacing: CGFloat = 28
+    static let rowSpacing: CGFloat = 34
+    /// Sensible automotive inset from the top / left edges of the usable area.
+    static let topPadding: CGFloat = 40
+    static let leadingPadding: CGFloat = 44
+    static let bottomPadding: CGFloat = 40
 }
 
-// MARK: - Tiles
+// MARK: - App icon
 
-/// A tappable Home app tile. Tapping forwards `featureID` — it knows nothing
+/// A tappable Home app icon. Tapping forwards `featureID` — it knows nothing
 /// about which feature that is or how it opens.
 struct HomeAppTileButton: View {
 
@@ -100,7 +119,7 @@ struct HomeAppTileButton: View {
     let featureID: FeatureID
     let onOpen: (FeatureID) -> Void
 
-    /// The tap action — the tile's whole job. Exposed for tests.
+    /// The tap action — the icon's whole job. Exposed for tests.
     func activate() { onOpen(featureID) }
 
     private var title: String { manifest?.title ?? featureID }
@@ -108,88 +127,113 @@ struct HomeAppTileButton: View {
 
     var body: some View {
         Button(action: activate) {
-            HomeAppTile(symbol: symbol, title: title)
-                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            HomeAppIcon(symbol: symbol, title: title)
         }
-        .buttonStyle(HomeTileButtonStyle())
+        .buttonStyle(HomeIconButtonStyle())
+        .accessibilityLabel(title)
         .accessibilityHint("Opens \(title)")
+        .accessibilityAddTraits(.isButton)
     }
 }
 
-/// The tile's visuals — dumb, reused for real and "coming soon" tiles.
-struct HomeAppTile: View {
+/// The icon's visuals — a rounded-square glyph container with the title beneath.
+/// Dumb and feature-agnostic; reused for real and "coming soon" icons.
+struct HomeAppIcon: View {
 
     let symbol: String
     let title: String
-    var comingSoon: Bool = false
+    var dimmed: Bool = false
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 40))
+        VStack(spacing: HomeMetrics.labelSpacing) {
+            RoundedRectangle(cornerRadius: HomeMetrics.iconCorner, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(white: 0.26), Color(white: 0.14)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: HomeMetrics.iconCorner, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+                .overlay(
+                    Image(systemName: symbol)
+                        .font(.system(size: HomeMetrics.glyphSize, weight: .semibold))
+                        .foregroundStyle(.white)
+                )
+                .frame(width: HomeMetrics.iconSize, height: HomeMetrics.iconSize)
+                .shadow(color: .black.opacity(0.45), radius: 9, y: 5)
+
             Text(title)
-                .font(.headline)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.white)
                 .lineLimit(1)
-            if comingSoon {
-                Text("Coming soon")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: HomeMetrics.iconSize + 28)
+
+            if dimmed {
+                Text("Soon")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.5))
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 150)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.white.opacity(comingSoon ? 0.04 : 0.10))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08))
-        )
-        .foregroundStyle(comingSoon ? Color.secondary : Color.primary)
-        .opacity(comingSoon ? 0.6 : 1)
+        .opacity(dimmed ? 0.5 : 1)
     }
 }
 
-/// A light press feedback so a tile reads as tappable — no elaborate animation.
-private struct HomeTileButtonStyle: ButtonStyle {
+/// The pressed state — a deliberate spring scale-down on the whole icon + label.
+private struct HomeIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .opacity(configuration.isPressed ? 0.72 : 1)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.9 : 1)
+            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
-// MARK: - Pages
+// MARK: - Page dots
 
-private struct HomePageControls: View {
+/// CarPlay-style page indicators — one small dot per **Home page** (never the
+/// Dashboard), current highlighted, each a large-hit-target button that selects
+/// its page. Owned here but positioned by `SpacePagerView`.
+struct HomePageDots: View {
 
-    let current: Int
     let count: Int
+    let current: Int
     let onSelect: (Int) -> Void
 
     var body: some View {
-        HStack(spacing: 18) {
-            Button { onSelect(current - 1) } label: { Image(systemName: "chevron.left") }
-                .disabled(current == 0)
-                .accessibilityLabel("Previous page")
-
-            HStack(spacing: 8) {
-                ForEach(Array(0..<count), id: \.self) { index in
+        HStack(spacing: 9) {
+            ForEach(Array(0..<max(0, count)), id: \.self) { index in
+                Button {
+                    onSelect(index)
+                } label: {
                     Circle()
-                        .fill(index == current ? Color.white : Color.white.opacity(0.3))
-                        .frame(width: 8, height: 8)
+                        .fill(index == current ? Color.white : Color.white.opacity(0.32))
+                        .frame(width: 7, height: 7)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Circle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    index == current
+                        ? "Home page \(index + 1) of \(count), current"
+                        : "Home page \(index + 1) of \(count)"
+                )
             }
-
-            Button { onSelect(current + 1) } label: { Image(systemName: "chevron.right") }
-                .disabled(current >= count - 1)
-                .accessibilityLabel("Next page")
         }
-        .font(.title3.weight(.semibold))
-        .foregroundStyle(.primary)
-        .buttonStyle(.plain)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+        .animation(.easeInOut(duration: 0.2), value: current)
     }
+}
+
+// MARK: - Coming-soon (presentation only)
+
+/// A presentation-only icon for an app that isn't built yet.
+struct HomeComingSoonApp: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let title: String
+    let symbolName: String
 }

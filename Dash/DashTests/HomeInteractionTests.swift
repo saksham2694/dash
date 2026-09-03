@@ -2,10 +2,11 @@
 //  HomeInteractionTests.swift
 //  DashTests
 //
-//  M5.3.0 — tapping a Home app tile opens its feature full-screen, and closing
-//  returns to the exact Home page it was opened from. The tile only forwards
-//  `HomeAppPlacement.featureID`; the surface bookkeeping is the existing
-//  `ShellStore` behaviour (unchanged).
+//  M5.3.0/M5.3.1 — the Home launcher's behaviour: an app icon forwards its
+//  `featureID` (never `ShellStore`); `HomeSpaceView` renders exactly its page;
+//  the Dashboard and the Home pages are ONE horizontal sequence of spaces
+//  (`SpacePagerView` / `ShellSurface.spaceIndex`); and closing a feature returns
+//  to the exact Home page it was opened from.
 //
 
 import Foundation
@@ -46,56 +47,41 @@ struct HomeTileTapTests {
     }
 }
 
-// MARK: - HomeSpaceView resolves + forwards
+// MARK: - HomeSpaceView renders its page + forwards
 
 @MainActor
 @Suite("HomeSpaceView")
 struct HomeSpaceViewTests {
 
     private func view(
-        _ layout: HomeLayout,
+        _ featureIDs: [FeatureID],
         registry: FeatureRegistry? = nil,
-        page: Int = 0,
         onOpen: @escaping (FeatureID) -> Void = { _ in }
     ) -> HomeSpaceView {
-        let store = HomeLayoutStore(
-            seed: layout,
-            defaults: UserDefaults(suiteName: "home-space-\(UUID().uuidString)")!
-        )
-        return HomeSpaceView(
-            layoutStore: store, registry: registry ?? FeatureRegistry.makeDefault(),
-            requestedPage: page, onSelectPage: { _ in }, onOpenFeature: onOpen
+        HomeSpaceView(
+            page: HomePage(apps: featureIDs.map { HomeAppPlacement(featureID: $0) }),
+            registry: registry ?? FeatureRegistry.makeDefault(),
+            onOpenFeature: onOpen
         )
     }
 
-    @Test("the default (registry-derived) layout puts the registered feature on Home")
+    @Test("the default (registry-derived) layout puts the registered feature on Home page 0")
     func resolvesRegisteredFeatures() {
         let registry = FeatureRegistry.makeDefault()
-        let layout = HomeLayout.starter(featureIDs: registry.manifests.map(\.id))
+        let layout = HomeLayout.paginate(featureIDs: registry.manifests.map(\.id))
+        let firstPageIDs = layout.page(at: 0)?.apps.map(\.featureID) ?? []
 
-        let home = view(layout, registry: registry)
+        let home = view(firstPageIDs, registry: registry)
 
-        #expect(home.currentPageFeatureIDs.contains(MapFeature.id))
+        #expect(home.featureIDs.contains(MapFeature.id))
         // …and the id resolves to a real manifest for the tile.
         #expect(registry.feature(MapFeature.id)?.manifest.title == "Maps")
     }
 
-    @Test("clamps the requested page to the pages that exist")
-    func clampsPage() {
-        let layout = HomeLayout.starter(featureIDs: ["a", "b", "c"], appsPerPage: 1) // 3 pages
-
-        #expect(view(layout, page: -3).resolvedPageIndex == 0)
-        #expect(view(layout, page: 0).resolvedPageIndex == 0)
-        #expect(view(layout, page: 2).resolvedPageIndex == 2)
-        #expect(view(layout, page: 99).resolvedPageIndex == 2)
-    }
-
-    @Test("shows only the current page's apps")
-    func currentPageOnly() {
-        let layout = HomeLayout.starter(featureIDs: ["a", "b", "c", "d"], appsPerPage: 2)
-
-        #expect(view(layout, page: 0).currentPageFeatureIDs == ["a", "b"])
-        #expect(view(layout, page: 1).currentPageFeatureIDs == ["c", "d"])
+    @Test("featureIDs are exactly the page's apps, in slot order")
+    func featureIDsMatchPage() {
+        #expect(view(["a", "b", "c"]).featureIDs == ["a", "b", "c"])
+        #expect(view([]).featureIDs.isEmpty)
     }
 }
 
@@ -141,12 +127,106 @@ struct HomeNavigationTests {
         #expect(shell.surface == .home(page: 2))
     }
 
-    @Test("opening from Dashboard still returns to Dashboard (unchanged)")
+    @Test("opening from the Dashboard still returns to the Dashboard (unchanged)")
     func dashboardUnaffected() {
         let shell = ShellStore()
-        shell.showDashboard(page: 1)
+        shell.showDashboard()
         shell.openApp("maps")
         shell.closeApp()
-        #expect(shell.surface == .dashboard(page: 1))
+        #expect(shell.surface == .dashboard)
+    }
+}
+
+// MARK: - Shell-level horizontal space navigation
+
+@MainActor
+@Suite("Horizontal space navigation")
+struct HomePagingShellTests {
+
+    /// `SpacePagerView` for a given surface + Home layout, so we can read its
+    /// seeded space index and the pure surface mapping.
+    private func pager(
+        surface: ShellSurface,
+        homeApps: [FeatureID],
+        capacity: Int = HomeGrid.capacity
+    ) -> SpacePagerView {
+        SpacePagerView(
+            shell: ShellStore(surface: surface),
+            homeLayout: HomeLayoutStore(
+                seed: .paginate(featureIDs: homeApps, capacity: capacity),
+                defaults: UserDefaults(suiteName: "pager-h-\(UUID().uuidString)")!
+            ),
+            dashboardLayout: DashboardLayoutStore(
+                seed: .starter(featureID: "maps"),
+                defaults: UserDefaults(suiteName: "pager-d-\(UUID().uuidString)")!
+            ),
+            registry: FeatureRegistry.makeDefault(),
+            grid: .standard
+        )
+    }
+
+    private func manyIDs(_ n: Int) -> [FeatureID] { (0..<n).map { "app-\($0)" } }
+
+    @Test("the pager seeds its space index from the shell surface")
+    func seedsFromShell() {
+        #expect(pager(surface: .dashboard, homeApps: ["maps"]).currentSpaceIndex == 0)
+        #expect(pager(surface: .home(page: 0), homeApps: ["maps"]).currentSpaceIndex == 1)
+    }
+
+    @Test("initial layout: only Dashboard ←→ Home page 0")
+    func initialSpaces() {
+        let dash = pager(surface: .dashboard, homeApps: ["maps"])
+        #expect(dash.surfaceForCurrentSpace == .dashboard)
+        #expect(dash.currentHomePage == nil)
+
+        let home = pager(surface: .home(page: 0), homeApps: ["maps"])
+        #expect(home.surfaceForCurrentSpace == .home(page: 0))
+        #expect(home.currentHomePage == 0)
+    }
+
+    @Test("with a second Home page, Home page 1 is the space after Home page 0")
+    func secondHomePage() {
+        let ids = manyIDs(HomeGrid.capacity + 1) // spills onto a second page
+        let p = pager(surface: .home(page: 1), homeApps: ids)
+        #expect(p.currentSpaceIndex == 2)
+        #expect(p.surfaceForCurrentSpace == .home(page: 1))
+        #expect(p.currentHomePage == 1)
+    }
+
+    /// The `DashboardShell` wiring: a dot / sidebar selection → `ShellStore.goToPage`.
+    @Test("a Home page selection updates the Home surface page")
+    func pageSelectionUpdatesSurface() {
+        let shell = ShellStore()
+        shell.showHome(page: 0)
+
+        shell.goToPage(2)
+        #expect(shell.surface == .home(page: 2))
+
+        // …and opening / closing an app from there keeps that page.
+        shell.openApp("maps")
+        shell.closeApp()
+        #expect(shell.surface == .home(page: 2))
+    }
+
+    @Test("goToPage on the Dashboard is a no-op (there is one Dashboard)")
+    func dashboardPagingUnaffected() {
+        let shell = ShellStore()
+        shell.showDashboard()
+        shell.goToPage(1)
+        #expect(shell.surface == .dashboard)
+    }
+
+    @Test("stepping between adjacent spaces, and the bounds at each end")
+    func adjacentStepsAndBounds() {
+        // One Home page: Dashboard (0) ←→ Home page 0 (1).
+        #expect(ShellSurface.forSpaceIndex(0 - 1, homePageCount: 1) == .dashboard)     // before first
+        #expect(ShellSurface.forSpaceIndex(0 + 1, homePageCount: 1) == .home(page: 0)) // Dashboard → Home
+        #expect(ShellSurface.forSpaceIndex(1 - 1, homePageCount: 1) == .dashboard)     // Home → Dashboard
+        #expect(ShellSurface.forSpaceIndex(1 + 1, homePageCount: 1) == .home(page: 0)) // past last → clamp
+
+        // Two Home pages: Dashboard (0), Home 0 (1), Home 1 (2).
+        #expect(ShellSurface.forSpaceIndex(1 + 1, homePageCount: 2) == .home(page: 1))
+        #expect(ShellSurface.forSpaceIndex(2 - 1, homePageCount: 2) == .home(page: 0))
+        #expect(ShellSurface.forSpaceIndex(2 + 1, homePageCount: 2) == .home(page: 1)) // past last → clamp
     }
 }

@@ -107,24 +107,18 @@ struct DashboardLayoutStoreTests {
 @Suite("DashboardSpaceView")
 struct DashboardSpaceViewTests {
 
-    @Test("clamps the requested page to the pages that exist")
-    func clampsRequestedPage() {
+    @Test("renders the single Dashboard page and is feature-agnostic")
+    func rendersTheOnePage() {
         let store = DashboardLayoutStore(
             seed: .starter(featureID: "maps"),
             defaults: UserDefaults(suiteName: "dash-space-\(UUID().uuidString)")!
         )
-        let registry = FeatureRegistry.makeDefault()
+        let view = DashboardSpaceView(
+            layoutStore: store, registry: FeatureRegistry.makeDefault(), grid: .standard,
+            onOpenFeature: { _ in }
+        )
 
-        func view(_ page: Int) -> DashboardSpaceView {
-            DashboardSpaceView(
-                layoutStore: store, registry: registry, grid: .standard,
-                requestedPage: page, onSelectPage: { _ in }, onOpenFeature: { _ in }
-            )
-        }
-
-        #expect(view(-5).resolvedPageIndex == 0)
-        #expect(view(0).resolvedPageIndex == 0)
-        #expect(view(1).resolvedPageIndex == 1)   // starter ships 2 pages
-        #expect(view(99).resolvedPageIndex == 1)
+        #expect(view.page?.id == store.layout.pages.first?.id)
+        #expect(view.page?.placements.isEmpty == false)
     }
 }

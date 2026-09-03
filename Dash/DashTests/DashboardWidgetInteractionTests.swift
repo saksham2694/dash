@@ -73,18 +73,16 @@ struct DashboardWidgetNavigationTests {
         shell.openApp(id)
     }
 
-    @Test("opening a widget from a dashboard page returns to that exact page")
-    func returnsToDashboardPage() {
-        for page in [0, 1, 2, 5] {
-            let shell = ShellStore()
-            shell.showDashboard(page: page)
+    @Test("opening a widget from the Dashboard returns to the Dashboard")
+    func returnsToDashboard() {
+        let shell = ShellStore()
+        shell.showDashboard()
 
-            tapWidget(shell, "maps")
-            #expect(shell.surface == .app("maps"))
+        tapWidget(shell, "maps")
+        #expect(shell.surface == .app("maps"))
 
-            shell.closeApp()
-            #expect(shell.surface == .dashboard(page: page))
-        }
+        shell.closeApp()
+        #expect(shell.surface == .dashboard)
     }
 
     @Test("opening a widget from Home returns to Home")
@@ -102,7 +100,7 @@ struct DashboardWidgetNavigationTests {
     @Test("two widget taps for different features each open the right feature, then return")
     func multipleFeatures() {
         let shell = ShellStore()
-        shell.showDashboard(page: 1)
+        shell.showDashboard()
 
         tapWidget(shell, "maps")
         #expect(shell.surface == .app("maps"))
@@ -112,16 +110,16 @@ struct DashboardWidgetNavigationTests {
         #expect(shell.surface == .app("music"))
         shell.closeApp()
 
-        #expect(shell.surface == .dashboard(page: 1))
+        #expect(shell.surface == .dashboard)
     }
 
-    @Test("the wired DashboardShell callback (openApp) does not change page memory")
-    func pageMemoryIsExact() {
+    @Test("the wired DashboardShell callback (openApp) remembers the Dashboard as the return surface")
+    func returnSurfaceIsDashboard() {
         let shell = ShellStore()
-        shell.showDashboard(page: 3)
+        shell.showDashboard()
         shell.openApp("maps")          // the DashboardShell wiring: onOpenFeature -> openApp
-        #expect(shell.returnSurface == .dashboard(page: 3))
+        #expect(shell.returnSurface == .dashboard)
         shell.closeApp()
-        #expect(shell.surface == .dashboard(page: 3))
+        #expect(shell.surface == .dashboard)
     }
 }

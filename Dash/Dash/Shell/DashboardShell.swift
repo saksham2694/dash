@@ -9,11 +9,13 @@
 //  Shown by `RootView` whenever Dash is connected, in place of the old
 //  full-screen map view.
 //
-//  Scope so far: the shell/feature seam, the widget dashboard grid, real Map
-//  dashboard components (M5.2.x), and the paged Home launcher (M5.3.0). Both
-//  spaces forward a tapped tile's `featureID` through an `onOpenFeature`
-//  callback → `ShellStore.openApp`; `closeApp()` returns to the exact Home /
-//  Dashboard page it was opened from. Feature runtime state stays app-scoped
+//  Scope so far: the shell/feature seam, the single widget dashboard, real Map
+//  dashboard components (M5.2.x), and the App-Home launcher (M5.3.x). The
+//  Dashboard and the Home pages form one horizontal sequence of spaces driven
+//  by `SpacePagerView`; a full-screen `.app` is shown instead of that pager.
+//  Both spaces forward a tapped tile's `featureID` through an `onOpenFeature`
+//  callback → `ShellStore.openApp`; `closeApp()` returns to the exact Home page
+//  / the Dashboard it was opened from. Feature runtime state stays app-scoped
 //  (M5.1).
 //
 
@@ -63,31 +65,23 @@ struct DashboardShell: View {
 
     @ViewBuilder
     private var content: some View {
-        switch shell.surface {
-        case .home(let pageIndex):
-            HomeSpaceView(
-                layoutStore: homeLayout,
-                registry: registry,
-                requestedPage: pageIndex,
-                onSelectPage: { shell.goToPage($0) },
-                onOpenFeature: { shell.openApp($0) },
-                comingSoon: Self.comingSoonApps
-            )
-        case .dashboard(let pageIndex):
-            DashboardSpaceView(
-                layoutStore: layoutStore,
-                registry: registry,
-                grid: grid,
-                requestedPage: pageIndex,
-                onSelectPage: { shell.goToPage($0) },
-                onOpenFeature: { shell.openApp($0) }
-            )
-        case .app(let id):
+        if case .app(let id) = shell.surface {
             if let feature = registry.feature(id) {
                 feature.makeFullScreenView()
             } else {
                 MissingFeatureView(id: id, onBack: { shell.closeApp() })
             }
+        } else {
+            // The Dashboard and the Home pages are one horizontal sequence of
+            // spaces, driven by a single shell-level pager.
+            SpacePagerView(
+                shell: shell,
+                homeLayout: homeLayout,
+                dashboardLayout: layoutStore,
+                registry: registry,
+                grid: grid,
+                comingSoon: Self.comingSoonApps
+            )
         }
     }
 }

@@ -16,6 +16,10 @@
 //  `DashboardShell`) — no feature-specific navigation logic here. No editing,
 //  no drag, no resize.
 //
+//  M5.3.1: there is exactly ONE Dashboard space — no Dashboard pages, no page
+//  controls. This renders the first (only) page. `DashboardLayout` keeps a page
+//  model internally for a possible future customisation feature.
+//
 
 import SwiftUI
 
@@ -25,39 +29,20 @@ struct DashboardSpaceView: View {
     let registry: FeatureRegistry
     let grid: DashboardGrid
 
-    /// Which page the shell wants shown (`ShellSurface.dashboard(page:)`).
-    let requestedPage: Int
-
-    /// Ask the shell to move to a page.
-    let onSelectPage: (Int) -> Void
-
     /// Ask the shell to open a feature full-screen (a widget was tapped). The
     /// dashboard never touches `ShellStore` directly.
     let onOpenFeature: (FeatureID) -> Void
 
     private static let gap: CGFloat = 12
 
-    /// `requestedPage` clamped to the pages that actually exist. Exposed for
-    /// tests; the shell never has to know the page count.
-    var resolvedPageIndex: Int {
-        let count = layoutStore.layout.pageCount
-        guard count > 0 else { return 0 }
-        return min(max(0, requestedPage), count - 1)
-    }
-
-    private var page: DashboardPage? { layoutStore.layout.page(at: resolvedPageIndex) }
-    private var pageCount: Int { layoutStore.layout.pageCount }
+    /// The single Dashboard page. Exposed for tests; the shell never has to know
+    /// anything about pages.
+    var page: DashboardPage? { layoutStore.layout.pages.first }
 
     var body: some View {
-        VStack(spacing: 12) {
-            GeometryReader { proxy in
-                gridBody(in: proxy.size)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-
-            if pageCount > 1 {
-                pageControls
-            }
+        GeometryReader { proxy in
+            gridBody(in: proxy.size)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -89,46 +74,16 @@ struct DashboardSpaceView: View {
                 emptyPage
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: resolvedPageIndex)
+        .animation(.easeInOut(duration: 0.2), value: page?.id)
     }
 
     private var emptyPage: some View {
         VStack(spacing: 8) {
             Image(systemName: "rectangle.dashed").font(.system(size: 40))
-            Text("Nothing on this page yet").font(.callout)
+            Text("Nothing on the dashboard yet").font(.callout)
         }
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    // MARK: - Pages
-
-    private var pageControls: some View {
-        HStack(spacing: 18) {
-            Button { onSelectPage(resolvedPageIndex - 1) } label: {
-                Image(systemName: "chevron.left")
-            }
-            .disabled(resolvedPageIndex == 0)
-            .accessibilityLabel("Previous page")
-
-            HStack(spacing: 8) {
-                ForEach(Array(0..<pageCount), id: \.self) { index in
-                    Circle()
-                        .fill(index == resolvedPageIndex ? Color.white : Color.white.opacity(0.3))
-                        .frame(width: 8, height: 8)
-                }
-            }
-
-            Button { onSelectPage(resolvedPageIndex + 1) } label: {
-                Image(systemName: "chevron.right")
-            }
-            .disabled(resolvedPageIndex >= pageCount - 1)
-            .accessibilityLabel("Next page")
-        }
-        .font(.title3.weight(.semibold))
-        .foregroundStyle(.primary)
-        .buttonStyle(.plain)
-        .padding(.vertical, 2)
     }
 }
 

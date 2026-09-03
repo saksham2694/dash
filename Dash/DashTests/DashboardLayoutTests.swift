@@ -52,15 +52,14 @@ struct DashboardLayoutModelTests {
         #expect(WidgetPlacement(id: fixed, featureID: "maps", size: .compact, origin: .init(column: 0, row: 0)).id == fixed)
     }
 
-    @Test("page access is bounds-checked")
+    @Test("the starter layout is the single Dashboard page; page access is bounds-checked")
     func pageAccess() {
         let layout = DashboardLayout.starter(featureID: "maps")
-        #expect(layout.pageCount == 2)
+        #expect(layout.pageCount == 1)
         #expect(layout.page(at: 0) != nil)
-        #expect(layout.page(at: 1) != nil)
-        #expect(layout.page(at: 2) == nil)
+        #expect(layout.page(at: 1) == nil)
         #expect(layout.page(at: -1) == nil)
-        #expect(layout.allPlacements.count == 5)
+        #expect(layout.allPlacements.count == 3)
     }
 
     @Test("empty vs non-empty")

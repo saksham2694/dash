@@ -26,26 +26,53 @@ struct HomeLayoutModelTests {
         #expect(HomeAppPlacement(id: fixed, featureID: "maps").id == fixed)
     }
 
-    @Test("starter splits the feature ids across pages, in order")
-    func starterPaging() {
-        let layout = HomeLayout.starter(featureIDs: ["a", "b", "c", "d", "e"], appsPerPage: 2)
+    @Test("paginate splits the feature ids across pages, in order, filling each first")
+    func paginateSplitsInOrder() {
+        let layout = HomeLayout.paginate(featureIDs: ["a", "b", "c", "d", "e"], capacity: 2)
         #expect(layout.pageCount == 3)
         #expect(layout.page(at: 0)?.apps.map(\.featureID) == ["a", "b"])
         #expect(layout.page(at: 1)?.apps.map(\.featureID) == ["c", "d"])
         #expect(layout.page(at: 2)?.apps.map(\.featureID) == ["e"])
         #expect(layout.allApps.count == 5)
+        // No empty pages.
+        #expect(layout.pages.allSatisfy { !$0.apps.isEmpty })
     }
 
-    @Test("starter with no features is one empty page")
-    func starterEmpty() {
-        let layout = HomeLayout.starter(featureIDs: [])
+    @Test("capacity drives the page count: 5 / 10 / 17 apps at capacity 8")
+    func paginateCapacityExamples() {
+        func ids(_ n: Int) -> [FeatureID] { (0..<n).map { "app-\($0)" } }
+        #expect(HomeLayout.paginate(featureIDs: ids(5), capacity: 8).pageCount == 1)
+        #expect(HomeLayout.paginate(featureIDs: ids(10), capacity: 8).pageCount == 2)
+        #expect(HomeLayout.paginate(featureIDs: ids(17), capacity: 8).pageCount == 3)
+    }
+
+    @Test("one real app is a single Home page at the default capacity")
+    func paginateSingleApp() {
+        let layout = HomeLayout.paginate(featureIDs: ["maps"])
+        #expect(layout.pageCount == 1)
+        #expect(layout.page(at: 0)?.apps.map(\.featureID) == ["maps"])
+    }
+
+    @Test("a full page adds no extra page; one more app adds exactly one page")
+    func paginateGrowsByOnePage() {
+        func ids(_ n: Int) -> [FeatureID] { (0..<n).map { "app-\($0)" } }
+        let cap = HomeGrid.capacity
+        #expect(HomeLayout.paginate(featureIDs: ids(cap)).pageCount == 1)
+        #expect(HomeLayout.paginate(featureIDs: ids(cap + 1)).pageCount == 2)
+        #expect(HomeLayout.paginate(featureIDs: ids(cap * 2)).pageCount == 2)
+        #expect(HomeLayout.paginate(featureIDs: ids(cap * 2 + 1)).pageCount == 3)
+    }
+
+    @Test("paginate with no features is one empty page")
+    func paginateEmpty() {
+        let layout = HomeLayout.paginate(featureIDs: [])
         #expect(layout.pageCount == 1)
         #expect(layout.isEmpty)
     }
 
     @Test("page access is bounds-checked and page index is clamped")
     func pageHandling() {
-        let layout = HomeLayout.starter(featureIDs: ["a", "b", "c"], appsPerPage: 1)
+        let layout = HomeLayout.paginate(featureIDs: ["a", "b", "c"], capacity: 1)
         #expect(layout.pageCount == 3)
         #expect(layout.page(at: 1) != nil)
         #expect(layout.page(at: 3) == nil)
@@ -61,7 +88,7 @@ struct HomeLayoutModelTests {
 
     @Test("round-trips through Codable with identity preserved")
     func codableRoundTrip() throws {
-        let original = HomeLayout.starter(featureIDs: ["maps", "music", "speedometer"], appsPerPage: 2)
+        let original = HomeLayout.paginate(featureIDs: ["maps", "music", "speedometer"], capacity: 2)
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(HomeLayout.self, from: data)
 
@@ -81,7 +108,7 @@ struct HomeLayoutStoreTests {
         UserDefaults(suiteName: "dash-home-\(UUID().uuidString)")!
     }
 
-    private let seed = HomeLayout.starter(featureIDs: ["maps"])
+    private let seed = HomeLayout.paginate(featureIDs: ["maps"])
     private let altLayout = HomeLayout(pages: [
         HomePage(apps: [HomeAppPlacement(featureID: "maps"), HomeAppPlacement(featureID: "music")]),
     ])

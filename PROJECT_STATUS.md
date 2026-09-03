@@ -2794,3 +2794,21 @@ Status: Implemented.
 - No commit was made by Claude.
 
 Next: M5.4.0 — Speedometer feature (a second real `DashFeature`; sidebar + Home + dashboard widget presentations).
+
+## M5.3.1 — CarPlay-style Home + corrected space navigation
+
+Status: Implemented.
+
+- **One Dashboard, no Dashboard pages.** `ShellSurface` dropped `dashboard(page:)` for a single `dashboard` case; `DashboardLayout.starter` now emits exactly one page; `DashboardSpaceView` renders that page with no page controls. `DashboardLayout` keeps its page model internally for a possible future customization feature, but the product ships one Dashboard space.
+- **Horizontally paged Home spaces.** The Dashboard and the Home pages form one left-to-right sequence of "spaces": `Dashboard ←→ Home page 1 ←→ Home page 2 ←→ …`. Initially just `Dashboard ←→ Home page 1`. Swiping moves between the Dashboard and Home as adjacent spaces; extra Home pages continue after Home page 1.
+- **Shell-level `SpacePagerView`.** A single native `TabView` (page style) at the shell level composes `DashboardSpaceView` (tag 0) then one `HomeSpaceView` per Home page (tag N+1). Its selection is a flat "space index" (`ShellSurface.spaceIndex` / `.forSpaceIndex` / `.spaceCount(homePageCount:)`), synced two-way with `ShellStore.surface` so a swipe and a sidebar tap stay consistent. No custom gesture recognizer, no separate per-surface TabViews. A full-screen `.app` is shown by `DashboardShell` *instead of* the pager.
+- **Home pages auto-generated from app count.** New pure `HomeLayout.paginate(featureIDs:capacity:)` splits the registered feature ids into pages, filling each page before starting the next — page count is exactly `ceil(count / capacity)`, minimum one, never an empty page. As real apps are added they fill page 1, then page 2, etc.
+- **4×4 / 16-app launcher capacity.** `HomeGrid` (columns 4 × rows 4 = 16) is the launcher's design grid and the pagination capacity. Today: one registered app (Maps) → one Home page. The presentation-only "coming soon" tiles (Music, Speedometer) render on the last page only and are **not** counted toward pagination, so they create no extra pages.
+- **Top-left app positioning.** `HomeSpaceView` lays icons out in a fixed-column grid anchored to the top-left of the usable area (sensible automotive top/left insets), filling left-to-right then top-to-bottom. The grid is not vertically or horizontally centered.
+- **Home page dots only when there are multiple Home pages.** `HomePageDots` indicates Home pages exclusively (never the Dashboard), is hidden with a single Home page, and is positioned by `SpacePagerView`.
+- **Preserved:** opening an app from Home page N returns to Home page N; opening a widget from the Dashboard returns to the Dashboard (`ShellStore.openApp` / `closeApp` / `returnSurface`, unchanged). The sidebar's Home / Dashboard / per-app buttons still jump directly. `HomeSpaceView` / `DashboardSpaceView` stay feature-agnostic (only `HomePage` / `WidgetPlacement` / `FeatureID` / `FeatureManifest` + callbacks); `MapFeature` untouched.
+- DashTests: 401/401 passed. Build: succeeded with no new warnings.
+- Physical iPad verification passed.
+- No commit was made by Claude.
+
+Next: M5.4.0 — Speedometer feature (a second real `DashFeature`; sidebar + Home + dashboard widget presentations).
