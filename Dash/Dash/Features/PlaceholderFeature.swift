@@ -2,13 +2,13 @@
 //  PlaceholderFeature.swift
 //  Dash
 //
-//  Registered-but-not-yet-implemented features. Apple Maps, Apple Music, Weather,
-//  the Speedometer and Settings are real Dash features — they belong in the
-//  sidebar and the Home launcher with their own identity now, not as dimmed
-//  "coming soon" stand-ins. Their runtime isn't built yet, so opening one
-//  full-screen shows a short "not set up yet" panel. They advertise no widget
-//  sizes, so the dashboard widget picker simply doesn't offer them until they
-//  ship.
+//  Registered-but-not-yet-implemented features. Apple Maps, Apple Music, Weather
+//  and Settings are real Dash features — they belong in the sidebar and the Home
+//  launcher with their own identity now, not as dimmed "coming soon" stand-ins.
+//  Their runtime isn't built yet, so opening one full-screen shows a short
+//  "not set up yet" panel. They advertise no widget sizes, so the dashboard
+//  widget picker simply doesn't offer them until they ship. (Speedometer became
+//  a real feature in M8.0 — see `SpeedometerFeature`.)
 //
 //  When a feature is implemented for real it gets its own file (e.g.
 //  `SettingsFeature`) and drops out of here — the **id** and manifest identity
@@ -65,7 +65,6 @@ extension PlaceholderFeature {
         static let appleMaps = "apple-maps"
         static let music = "music"
         static let weather = "weather"
-        static let speedometer = "speedometer"
         static let settings = "settings"
     }
 
@@ -99,17 +98,6 @@ extension PlaceholderFeature {
             tint: .teal,
             iconAssetName: "app-icon-weather",
             blurb: "A glanceable weather widget is on the way."
-        )
-    }
-
-    static func speedometer() -> PlaceholderFeature {
-        PlaceholderFeature(
-            id: ID.speedometer,
-            title: "Speedometer",
-            symbolName: "speedometer",
-            tint: .orange,
-            iconAssetName: "app-icon-speedometer",
-            blurb: "A large speed readout and trip computer are on the way."
         )
     }
 

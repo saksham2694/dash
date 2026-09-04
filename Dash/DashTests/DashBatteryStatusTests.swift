@@ -19,11 +19,11 @@ struct DashBatteryStatusTests {
 
     @Test("a normal discharging percentage shows the level glyph + N%")
     func normal() {
-        let s = f(64, .unplugged, .live)
-        #expect(s.text == "64%")
+        let s = f(55, .unplugged, .live)
+        #expect(s.text == "55%")
         #expect(s.symbolName == "battery.50")
         #expect(s.isDimmed == false)
-        #expect(s.accessibilityLabel == "iPhone battery 64 percent")
+        #expect(s.accessibilityLabel == "iPhone battery 55 percent")
     }
 
     @Test("charging uses the bolt glyph and says charging")

@@ -128,12 +128,20 @@ struct FeatureIconIdentityTests {
     @Test("every not-yet-built feature advertises no dashboard widget size")
     func placeholdersHaveNoWidgets() {
         let registry = FeatureRegistry.makeDefault()
-        for id in ["apple-maps", "music", "weather", "speedometer", "settings"] {
+        for id in ["apple-maps", "music", "weather", "settings"] {
             #expect(registry.feature(id)?.manifest.supportedWidgetSizes.isEmpty == true)
         }
-        // …so the Add-Widget picker only offers Google Maps (the one real feature).
+        // …so the Add-Widget picker offers only the real widget features.
         let placeable = DashboardWidgetPickerView.placeableFeatures(registry.manifests).map(\.id)
-        #expect(placeable == ["maps"])
+        #expect(placeable == ["maps", "speedometer"])
+    }
+
+    @Test("the Speedometer offers every widget size from one engine")
+    func speedometerHasWidgets() {
+        let registry = FeatureRegistry.makeDefault()
+        let manifest = registry.feature("speedometer")?.manifest
+        #expect(manifest?.supportedWidgetSizes == [.compact, .medium, .large])
+        #expect(manifest?.supportedSizes.contains(.full) == true)
     }
 
     @Test("Settings keeps a stable id for a future real SettingsFeature")

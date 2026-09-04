@@ -3017,3 +3017,77 @@ Tests / build:
   re-completed this session (simulator-install flake under concurrent runs, not a
   test failure); to be re-run.
 - Nothing committed.
+
+## M8.0 — Speedometer engine + basic speed display
+
+Status: Implemented. To be physically tested on the moving iPad.
+
+Actual location/speed cadence (read from the code, not assumed):
+- DashRelay `LocationTracker`: `kCLLocationAccuracyBestForNavigation`,
+  `.automotiveNavigation`, `pausesLocationUpdatesAutomatically = false`, no
+  `distanceFilter`. One `LocationPacket` per `CLLocationManager` callback, sent
+  in-callback — no timer, no throttle, no coalescing. `LocationBroadcaster` sends
+  every packet to every connected client (none while unconnected);
+  `RelaySessionController` is a straight passthrough.
+- Net: ~1 Hz nominal but IRREGULAR — 0.5–2 s spacing is normal, multi-second gaps
+  on signal loss, occasional multi-fix callbacks. The engine assumes none of it.
+- `LocationPacket.timestamp` = the iPhone GPS fix time (one clock — used for
+  inter-sample elapsed time). iPad arrival time drives `LocationStore`'s 7 s
+  staleness watchdog. `LocationStore.speed` is the RAW `CLLocation.speed` (m/s),
+  negative when the fix can't determine speed — not sanitised.
+
+SpeedometerEngine (pure value type — no SwiftUI / networking / Dash types):
+- Consumes timestamped raw samples from the EXISTING `LocationPacket` stream — no
+  new packet. Handles invalid speed (< 0 / NaN), out-of-order / duplicate fix
+  times, near-zero GPS jitter (parks at exactly 0), sudden changes (no
+  overshoot), delayed / missing samples, and staleness (`staleAfter`, default 5 s).
+- Smoothing: closed-form first-order low-pass. On each valid sample it snapshots
+  the current display value, then `display(t) = target − (target − snapshot)·
+  e^(−(t−anchor)/τ)`, τ = 0.6 s. Frame-rate independent, needs no next-sample
+  guess, cannot overshoot, and `target` never leaves the last real sample so it
+  never extrapolates speed. Chosen as the simplest thing that makes 50→52→48 read
+  continuously; an asymmetric τ for harder-braking response is a possible M8.1
+  tweak.
+
+Self-contained feature boundary:
+- New `Features/Speedometer/`: `SpeedometerEngine`, `SpeedometerViewModel`,
+  `SpeedometerUnit`, `SpeedometerTelemetry` (protocol), `SpeedometerView` /
+  `SpeedometerComponentView` / `SpeedometerReadoutView`, `SpeedometerFeature`.
+  Only `SpeedometerFeature.swift` names a shell-side type (`DashFeature`). Engine,
+  view model, units and views know nothing about `DashboardShell`, the sidebar,
+  the dashboard grid, or navigation.
+- Location arrives through ONE seam — `SpeedometerTelemetry`. Dash satisfies it
+  via `LocationStore` in a single bridge file
+  (`SpeedometerTelemetryLocationStore.swift`); deleting that one file extracts the
+  feature for a standalone app.
+- `SpeedometerFeature` replaces `PlaceholderFeature.speedometer()` — same id
+  (`"speedometer"`), title, icon, pinned tint. Now advertises `.compact` /
+  `.medium` / `.large` / `.full`, so the Add-Widget picker offers it.
+
+Basic display (intentionally minimal — visual design is M8.1+):
+- One big rounded number + unit label, same `SpeedometerReadoutView` at every
+  size (only the type scale + a "SPEED" caption on large differ). Driven by a
+  30 Hz `TimelineView` tick on the ONE shared view model — no per-size speed
+  logic. Unavailable → en-dash; stale → dimmed + "No signal";
+  `.contentTransition(.numericText)` for digit rollover.
+
+Units: engine works in m/s; conversion isolated in `SpeedometerUnit` (km/h + mph).
+Default km/h (India). `SpeedometerViewModel.setUnit` is the hook for a future
+Settings feature; no Settings UI.
+
+Tests / build:
+- New: `SpeedometerEngineTests` (19 — valid/invalid speed, km/h + mph, fix-time
+  ordering, irregular intervals, easing between samples, sudden change / no
+  overshoot, stopped → 0, staleness, delayed / missing sample, explicit
+  signal-lost, reset), `SpeedometerUnitTests` (2), `SpeedometerViewModelTests`
+  (7, fake telemetry). Feature-registry / widget-picker tests updated for
+  Speedometer becoming a real widget feature.
+- Full suite, all three schemes: Dash 594/594, DashRelay 44/44 (M5.7 battery
+  telemetry included), DashShared 16/16 — 0 failed, 0 skipped. All build clean
+  (Debug). One M5.7 test assertion (battery-glyph bucket boundary) corrected.
+
+Remaining for the visual Speedometer (M8.1+): gauge / needle / dashboard artwork;
+trip computer (distance / avg / max / reset-on-Bluetooth); a Settings unit
+toggle; any driving-feel tuning of τ.
+
+- Nothing committed.

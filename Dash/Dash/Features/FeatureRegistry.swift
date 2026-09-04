@@ -70,7 +70,7 @@ extension FeatureRegistry {
             PlaceholderFeature.appleMaps(),
             PlaceholderFeature.music(),      // "Apple Music"
             PlaceholderFeature.weather(),
-            PlaceholderFeature.speedometer(),
+            SpeedometerFeature(),            // real speed readout (M8.0)
             PlaceholderFeature.settings(),
         ])
     }
