@@ -17,8 +17,11 @@ import Foundation
 
 protocol LocationReceiving: AnyObject, Sendable {
 
-    /// Called on the main actor for every decoded packet.
+    /// Called on the main actor for every decoded GPS packet.
     var onPacket: (@MainActor @Sendable (LocationPacket) -> Void)? { get set }
+
+    /// Called on the main actor for every decoded device-status packet.
+    var onDeviceStatus: (@MainActor @Sendable (DeviceStatusPacket) -> Void)? { get set }
 
     /// Called on the main actor whenever the transport's status changes.
     var onStatusChange: (@MainActor @Sendable (LocationReceiver.Status) -> Void)? { get set }

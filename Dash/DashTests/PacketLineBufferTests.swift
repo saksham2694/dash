@@ -39,7 +39,7 @@ struct PacketLineBufferTests {
 
         let out = buffer.append(try line(expected))
 
-        #expect(out == [expected])
+        #expect(out.compactMap(\.location) == [expected])
     }
 
     @Test("decodes two lines delivered in one chunk")
@@ -52,7 +52,7 @@ struct PacketLineBufferTests {
         chunk.append(try line(a))
         chunk.append(try line(b))
 
-        #expect(buffer.append(chunk) == [a, b])
+        #expect(buffer.append(chunk).compactMap(\.location) == [a, b])
     }
 
     @Test("reassembles a line split across chunks")
@@ -63,7 +63,7 @@ struct PacketLineBufferTests {
         let cut = full.count / 2
 
         #expect(buffer.append(full.prefix(cut)).isEmpty)
-        #expect(buffer.append(full.suffix(from: full.startIndex + cut)) == [expected])
+        #expect(buffer.append(full.suffix(from: full.startIndex + cut)).compactMap(\.location) == [expected])
     }
 
     @Test("holds a partial trailing line until its newline arrives")
@@ -76,8 +76,8 @@ struct PacketLineBufferTests {
         let bLine = try line(b)
         chunk.append(bLine.dropLast(5)) // b without its newline (and a few bytes)
 
-        #expect(buffer.append(chunk) == [a])
-        #expect(buffer.append(bLine.suffix(5)) == [b])
+        #expect(buffer.append(chunk).compactMap(\.location) == [a])
+        #expect(buffer.append(bLine.suffix(5)).compactMap(\.location) == [b])
     }
 
     @Test("ignores blank lines")
@@ -89,7 +89,7 @@ struct PacketLineBufferTests {
         chunk.append(try line(expected))
         chunk.append(0x0A)
 
-        #expect(buffer.append(chunk) == [expected])
+        #expect(buffer.append(chunk).compactMap(\.location) == [expected])
     }
 
     @Test("skips a malformed line but keeps decoding the rest")
@@ -100,7 +100,7 @@ struct PacketLineBufferTests {
         var chunk = Data("{not valid json}\n".utf8)
         chunk.append(try line(good))
 
-        #expect(buffer.append(chunk) == [good])
+        #expect(buffer.append(chunk).compactMap(\.location) == [good])
     }
 
     @Test("recovers after an oversized un-terminated line is dropped")
@@ -111,7 +111,7 @@ struct PacketLineBufferTests {
         #expect(buffer.append(garbage).isEmpty)
 
         let expected = packet()
-        #expect(buffer.append(try line(expected)) == [expected])
+        #expect(buffer.append(try line(expected)).compactMap(\.location) == [expected])
     }
 
     @Test("reset() discards a buffered partial line")
@@ -123,7 +123,7 @@ struct PacketLineBufferTests {
         buffer.reset()
 
         let expected = packet(latitude: 1)
-        #expect(buffer.append(try line(expected)) == [expected])
+        #expect(buffer.append(try line(expected)).compactMap(\.location) == [expected])
     }
 
     @Test("round-trips shared wire-format output back to the original packet")
@@ -131,6 +131,35 @@ struct PacketLineBufferTests {
         var buffer = PacketLineBuffer()
         let original = packet(speed: -1, heading: -1) // invalid-fix sentinels survive too
 
-        #expect(buffer.append(try LocationWireFormat.encodeLine(original)) == [original])
+        #expect(buffer.append(try LocationWireFormat.encodeLine(original)).compactMap(\.location) == [original])
+    }
+
+    // MARK: - Device-status lines on the same stream (M5.7)
+
+    @Test("a device-status line on the stream decodes to .deviceStatus")
+    func decodesDeviceStatusLine() throws {
+        var buffer = PacketLineBuffer()
+        let status = DeviceStatusPacket(batteryLevel: 0.66, batteryState: .charging,
+                                        timestamp: Date(timeIntervalSince1970: 1_756_700_000))
+
+        let out = buffer.append(try LocationWireFormat.encodeLine(status))
+
+        #expect(out == [.deviceStatus(status)])
+    }
+
+    @Test("location and device-status lines interleave without interfering")
+    func interleavedLines() throws {
+        var buffer = PacketLineBuffer()
+        let loc = packet(latitude: 5)
+        let status = DeviceStatusPacket(batteryLevel: 0.5, batteryState: .unplugged,
+                                        timestamp: Date(timeIntervalSince1970: 1_756_700_000))
+
+        var chunk = try LocationWireFormat.encodeLine(loc)
+        chunk.append(try LocationWireFormat.encodeLine(status))
+        chunk.append(try line(packet(latitude: 6)))
+
+        let out = buffer.append(chunk)
+        #expect(out.compactMap(\.location).map(\.latitude) == [5, 6])
+        #expect(out.compactMap(\.deviceStatus) == [status])
     }
 }

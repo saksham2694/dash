@@ -28,7 +28,7 @@ struct SpacePagerView: View {
 
     @ObservedObject private var shell: ShellStore
     @ObservedObject private var homeLayout: HomeLayoutStore
-    @ObservedObject private var dashboardLayout: DashboardLayoutStore
+    @ObservedObject private var dashboards: DashboardCollectionStore
     @ObservedObject private var dashboardEdit: DashboardEditModel
 
     private let registry: FeatureRegistry
@@ -41,14 +41,14 @@ struct SpacePagerView: View {
     init(
         shell: ShellStore,
         homeLayout: HomeLayoutStore,
-        dashboardLayout: DashboardLayoutStore,
+        dashboards: DashboardCollectionStore,
         dashboardEdit: DashboardEditModel,
         registry: FeatureRegistry,
         grid: DashboardGrid
     ) {
         _shell = ObservedObject(wrappedValue: shell)
         _homeLayout = ObservedObject(wrappedValue: homeLayout)
-        _dashboardLayout = ObservedObject(wrappedValue: dashboardLayout)
+        _dashboards = ObservedObject(wrappedValue: dashboards)
         _dashboardEdit = ObservedObject(wrappedValue: dashboardEdit)
         self.registry = registry
         self.grid = grid
@@ -82,7 +82,7 @@ struct SpacePagerView: View {
         ZStack(alignment: .bottom) {
             TabView(selection: $spaceIndex) {
                 DashboardSpaceView(
-                    layoutStore: dashboardLayout,
+                    dashboards: dashboards,
                     editModel: dashboardEdit,
                     registry: registry,
                     grid: grid,

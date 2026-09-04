@@ -22,7 +22,10 @@ final class HomeLayoutStore: ObservableObject {
 
     /// Namespaced key. A breaking schema change bumps the `.vN` suffix; the
     /// envelope `version` guards the current line.
-    static let storageKey = "shell.homeLayout.v1"
+    /// `.v2` — the M5.6 six-feature sidebar/Home registry; `.v1` layouts (three
+    /// features) are abandoned so a pre-M5.6 install picks up Apple Maps, Weather
+    /// and Settings. There is no Home customisation feature, so nothing is lost.
+    static let storageKey = "shell.homeLayout.v2"
 
     /// Current envelope schema version.
     static let schemaVersion = 1

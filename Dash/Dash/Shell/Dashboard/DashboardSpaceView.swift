@@ -43,7 +43,7 @@ import SwiftUI
 
 struct DashboardSpaceView: View {
 
-    @ObservedObject var layoutStore: DashboardLayoutStore
+    @ObservedObject var dashboards: DashboardCollectionStore
     @ObservedObject var editModel: DashboardEditModel
     let registry: FeatureRegistry
     let grid: DashboardGrid
@@ -53,6 +53,7 @@ struct DashboardSpaceView: View {
     let onOpenFeature: (FeatureID) -> Void
 
     @State private var showingPicker = false
+    @State private var showingDashboardManager = false
     @State private var editAlert: EditAlert?
 
     /// The in-flight drag / resize, if any. Transient — never persisted; the
@@ -63,7 +64,7 @@ struct DashboardSpaceView: View {
 
     /// The single Dashboard page. Exposed for tests; the shell never has to know
     /// anything about pages.
-    var page: DashboardPage? { layoutStore.layout.pages.first }
+    var page: DashboardPage? { dashboards.layout.pages.first }
 
     var body: some View {
         GeometryReader { proxy in
@@ -77,14 +78,21 @@ struct DashboardSpaceView: View {
         }
         .padding(DashMetrics.shellContentInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .topLeading) {
+            dashboardBar.padding(DashMetrics.spacingMedium)
+        }
         .overlay(alignment: .topTrailing) {
             editControls.padding(DashMetrics.spacingMedium)
         }
         .animation(.easeInOut(duration: 0.2), value: editModel.isEditing)
+        .animation(.easeInOut(duration: 0.2), value: dashboards.activeID)
         .sheet(isPresented: $showingPicker) {
             DashboardWidgetPickerView(manifests: registry.manifests) { featureID, size in
                 addWidget(featureID, size)
             }
+        }
+        .sheet(isPresented: $showingDashboardManager) {
+            DashboardManagerView(dashboards: dashboards)
         }
         .alert(
             editAlert?.title ?? "",
@@ -103,7 +111,7 @@ struct DashboardSpaceView: View {
     // MARK: - Edit-mode actions (all through DashboardLayoutStore)
 
     private func addWidget(_ featureID: FeatureID, _ size: ComponentSize) {
-        switch layoutStore.addWidget(featureID: featureID, size: size) {
+        switch dashboards.addWidget(featureID: featureID, size: size) {
         case .added:
             break
         case .noSpace, .rejected:
@@ -112,11 +120,11 @@ struct DashboardSpaceView: View {
     }
 
     private func removeWidget(_ id: UUID) {
-        layoutStore.removePlacement(id: id)
+        dashboards.removePlacement(id: id)
     }
 
     private func resizeWidget(_ id: UUID, to size: ComponentSize) {
-        if !layoutStore.updatePlacementSize(id: id, to: size) {
+        if !dashboards.updatePlacementSize(id: id, to: size) {
             editAlert = .sizeDoesNotFit
         }
     }
@@ -141,7 +149,7 @@ struct DashboardSpaceView: View {
         // drag gesture uses `.global` space, so the live `.offset` never feeds
         // back into it). No mid-drag layout write moves that reference.
         let snapped = geometry.proposedOrigin(movingFrom: placement.origin, span: span, by: translation)
-        let valid = layoutStore.canMovePlacement(id: placement.id, to: snapped)
+        let valid = dashboards.canMovePlacement(id: placement.id, to: snapped)
 
         var state = interaction ?? Interaction(kind: .move, placement: placement)
         guard state.kind == .move, state.placementID == placement.id else { return }
@@ -157,7 +165,7 @@ struct DashboardSpaceView: View {
             // invalid one. Nothing here is animated *during* the drag.
             withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
                 if state.lastValidOrigin != placement.origin {
-                    layoutStore.movePlacement(id: placement.id, to: state.lastValidOrigin)
+                    dashboards.movePlacement(id: placement.id, to: state.lastValidOrigin)
                 }
                 interaction = nil
             }
@@ -182,7 +190,7 @@ struct DashboardSpaceView: View {
             translation: translation,
             stepDistance: stepDistance
         )
-        let valid = layoutStore.canResizePlacement(id: placement.id, to: target)
+        let valid = dashboards.canResizePlacement(id: placement.id, to: target)
 
         var state = interaction ?? Interaction(kind: .resize, placement: placement)
         guard state.kind == .resize, state.placementID == placement.id else { return }
@@ -194,7 +202,7 @@ struct DashboardSpaceView: View {
         if ended {
             withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
                 if state.lastValidSize != placement.size {
-                    if !layoutStore.updatePlacementSize(id: placement.id, to: state.lastValidSize) {
+                    if !dashboards.updatePlacementSize(id: placement.id, to: state.lastValidSize) {
                         editAlert = .sizeDoesNotFit
                     }
                 }
@@ -210,6 +218,43 @@ struct DashboardSpaceView: View {
     private func liveMoveOffset(_ placement: WidgetPlacement) -> CGSize {
         guard let it = interaction, it.kind == .move, it.placementID == placement.id else { return .zero }
         return it.translation
+    }
+
+    // MARK: - Dashboards
+
+    /// Whether to show the dashboard switcher. Hidden entirely for the common
+    /// single-dashboard case in normal mode — it only appears once there is more
+    /// than one dashboard, or while editing (where "Add Dashboard" lives).
+    private var showsDashboardBar: Bool {
+        dashboards.dashboardCount > 1 || editModel.isEditing
+    }
+
+    @ViewBuilder
+    private var dashboardBar: some View {
+        if showsDashboardBar {
+            Button {
+                showingDashboardManager = true
+            } label: {
+                HStack(spacing: DashMetrics.spacingTight) {
+                    Text(dashboards.activeName)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+                .font(.dashControl)
+                .padding(.horizontal, DashMetrics.spacingMedium)
+                .padding(.vertical, DashMetrics.spacingSmall)
+                .background {
+                    Capsule().fill(.ultraThinMaterial).overlay(Capsule().fill(Color.dashPanelTint))
+                }
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: DashMetrics.hairline))
+                .foregroundStyle(Color.dashTextPrimary)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dashboard: \(dashboards.activeName)")
+            .accessibilityHint("Switch, add, rename, or remove dashboards")
+        }
     }
 
     // MARK: - Edit / Done / Add

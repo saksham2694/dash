@@ -85,4 +85,29 @@ struct FeatureRegistryTests {
         #expect(map?.manifest.title == "Google Maps")
         #expect(map?.manifest.supportedSizes.contains(.full) == true)
     }
+
+    @Test("all six sidebar features are registered with stable ids and unique names")
+    func sixFeatures() {
+        let registry = FeatureRegistry.makeDefault()
+        let ids = ["maps", "apple-maps", "music", "weather", "speedometer", "settings"]
+
+        #expect(registry.manifests.map(\.id) == ids)
+        for id in ids {
+            #expect(registry.feature(id) != nil, "\(id) should be registered")
+        }
+        let names = registry.manifests.map(\.title)
+        #expect(Set(names).count == names.count)   // no duplicate display names
+    }
+
+    @Test("Google Maps is the only real feature; the rest are placeholders that open the 'not set up' panel")
+    func placeholdersResolve() {
+        let registry = FeatureRegistry.makeDefault()
+
+        #expect(registry.feature("maps") as? MapFeature != nil)
+        for id in ["apple-maps", "music", "weather", "speedometer", "settings"] {
+            let feature = registry.feature(id)
+            #expect(feature as? PlaceholderFeature != nil, "\(id) should be a PlaceholderFeature")
+            #expect(feature?.manifest.supportedSizes == [.full])
+        }
+    }
 }

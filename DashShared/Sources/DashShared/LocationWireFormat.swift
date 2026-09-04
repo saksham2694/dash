@@ -27,13 +27,48 @@ public enum LocationWireFormat {
     /// A single newline character (`\n`) — the delimiter between packets.
     public static let lineDelimiter: UInt8 = 0x0A
 
-    /// One `LocationPacket` as compact JSON followed by a single `\n`.
+    /// One `LocationPacket` as compact JSON followed by a single `\n`. The wire
+    /// bytes are unchanged from before device-status telemetry existed.
     public static func encodeLine(
         _ packet: LocationPacket,
         using encoder: JSONEncoder = LocationWireFormat.makeEncoder()
     ) throws -> Data {
-        var data = try encoder.encode(packet)
+        try encodeLine(value: packet, using: encoder)
+    }
+
+    /// One `DeviceStatusPacket` as compact JSON followed by a single `\n` — the
+    /// second line kind on the same stream.
+    public static func encodeLine(
+        _ status: DeviceStatusPacket,
+        using encoder: JSONEncoder = LocationWireFormat.makeEncoder()
+    ) throws -> Data {
+        try encodeLine(value: status, using: encoder)
+    }
+
+    /// Shared framing: compact JSON for `value` + one `\n`.
+    private static func encodeLine(
+        value: some Encodable,
+        using encoder: JSONEncoder
+    ) throws -> Data {
+        var data = try encoder.encode(value)
         data.append(lineDelimiter)
         return data
+    }
+
+    /// Decode one already-de-framed line into a `RelayMessage`. A device-status
+    /// line (it carries `kind`) is tried first; otherwise a `LocationPacket`.
+    /// `nil` for a blank / undecodable line.
+    public static func decodeMessage(
+        from line: Data,
+        using decoder: JSONDecoder = LocationWireFormat.makeDecoder()
+    ) -> RelayMessage? {
+        if let status = try? decoder.decode(DeviceStatusPacket.self, from: line),
+           status.kind == DeviceStatusPacket.messageKind {
+            return .deviceStatus(status)
+        }
+        if let packet = try? decoder.decode(LocationPacket.self, from: line) {
+            return .location(packet)
+        }
+        return nil
     }
 }

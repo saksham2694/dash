@@ -2,9 +2,11 @@
 //  PacketLineBuffer.swift
 //  Dash
 //
-//  Reassembles a byte stream into `LocationPacket` values. The relay sends each
-//  packet as compact JSON followed by a single `\n`; TCP does not preserve those
-//  boundaries, so incoming chunks are buffered and split on `\n` here.
+//  Reassembles a byte stream into `RelayMessage` values — a `LocationPacket` or a
+//  `DeviceStatusPacket`, on the same stream. The relay sends each as compact JSON
+//  followed by a single `\n`; TCP does not preserve those boundaries, so incoming
+//  chunks are buffered and split on `\n` here, then each line is decoded via
+//  `LocationWireFormat.decodeMessage(from:)`.
 //
 //  Pure value type, no networking — this is the part that can be tested without
 //  two devices.
@@ -29,27 +31,27 @@ struct PacketLineBuffer {
         self.decoder = decoder
     }
 
-    /// Append freshly received bytes and return every packet that just became
-    /// complete. Blank lines are ignored; a line that fails to decode is skipped
-    /// without disturbing the rest of the stream.
-    mutating func append(_ data: Data) -> [LocationPacket] {
+    /// Append freshly received bytes and return every message that just became
+    /// complete, in arrival order. Blank lines are ignored; a line that fails to
+    /// decode is skipped without disturbing the rest of the stream.
+    mutating func append(_ data: Data) -> [RelayMessage] {
         buffer.append(data)
 
-        var packets: [LocationPacket] = []
+        var messages: [RelayMessage] = []
         while let newlineIndex = buffer.firstIndex(of: Self.newline) {
             let line = buffer[buffer.startIndex..<newlineIndex]
             buffer.removeSubrange(buffer.startIndex...newlineIndex)
 
             guard !line.isEmpty else { continue }
-            if let packet = try? decoder.decode(LocationPacket.self, from: Data(line)) {
-                packets.append(packet)
+            if let message = LocationWireFormat.decodeMessage(from: Data(line), using: decoder) {
+                messages.append(message)
             }
         }
 
         if buffer.count > Self.maxLineBytes {
             buffer.removeAll(keepingCapacity: false)
         }
-        return packets
+        return messages
     }
 
     /// Discard any partial line — call this on (re)connect.

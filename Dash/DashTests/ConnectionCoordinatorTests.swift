@@ -17,6 +17,7 @@ import DashShared
 /// drive the status / packet / discovery callbacks.
 final class StubLocationReceiver: LocationReceiving, @unchecked Sendable {
     var onPacket: (@MainActor @Sendable (LocationPacket) -> Void)?
+    var onDeviceStatus: (@MainActor @Sendable (DeviceStatusPacket) -> Void)?
     var onStatusChange: (@MainActor @Sendable (LocationReceiver.Status) -> Void)?
     var onDiscoveryChange: (@MainActor @Sendable ([DiscoveredRelay]) -> Void)?
 
@@ -30,6 +31,7 @@ final class StubLocationReceiver: LocationReceiving, @unchecked Sendable {
 
     @MainActor func emit(status: LocationReceiver.Status) { onStatusChange?(status) }
     @MainActor func emit(packet: LocationPacket) { onPacket?(packet) }
+    @MainActor func emit(deviceStatus: DeviceStatusPacket) { onDeviceStatus?(deviceStatus) }
     @MainActor func emit(discovery: [DiscoveredRelay]) { onDiscoveryChange?(discovery) }
 }
 
@@ -50,7 +52,12 @@ struct ConnectionCoordinatorTests {
         let store = LocationStore()
         let knownStore = makeStore()
         for device in known { knownStore.remember(device) }
-        let coordinator = ConnectionCoordinator(receiver: receiver, locationStore: store, knownDevices: knownStore)
+        let coordinator = ConnectionCoordinator(
+            receiver: receiver,
+            locationStore: store,
+            deviceStatusStore: DeviceStatusStore(),
+            knownDevices: knownStore
+        )
         return (coordinator, receiver, store, knownStore)
     }
 
@@ -229,7 +236,8 @@ struct ConnectionCoordinatorTests {
         let suite = UserDefaults(suiteName: "cc-persist-\(UUID().uuidString)")!
         let knownStore = KnownDeviceStore(defaults: suite)
         let coordinator = ConnectionCoordinator(
-            receiver: StubLocationReceiver(), locationStore: LocationStore(), knownDevices: knownStore
+            receiver: StubLocationReceiver(), locationStore: LocationStore(),
+            deviceStatusStore: DeviceStatusStore(), knownDevices: knownStore
         )
 
         coordinator.pairAndConnect(to: relay("relay-x", "iPhone X"))

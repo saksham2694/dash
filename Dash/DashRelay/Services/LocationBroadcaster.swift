@@ -42,6 +42,11 @@ final class LocationBroadcaster: @unchecked Sendable {
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     private var status = Status()
 
+    /// The most recent device-status line, resent to each new client so a
+    /// dashboard that connects between battery changes still gets a value
+    /// promptly. (Location is not cached — a fresh fix arrives within ~1s.)
+    private var latestDeviceStatusLine: Data?
+
     init(advertisement: RelayAdvertisement = RelayIdentity.load()) {
         self.advertisement = advertisement
         // The Bonjour instance name is user-facing but not an identity; fall back
@@ -70,6 +75,7 @@ final class LocationBroadcaster: @unchecked Sendable {
             connections.removeAll()
             listener?.cancel()
             listener = nil
+            latestDeviceStatusLine = nil
             updateStatus {
                 $0.isListening = false
                 $0.clientCount = 0
@@ -82,10 +88,25 @@ final class LocationBroadcaster: @unchecked Sendable {
     func broadcast(_ packet: LocationPacket) {
         queue.async { [self] in
             guard !connections.isEmpty,
-                  let line = try? Self.encodeLine(packet) else { return }
-            for connection in connections.values {
-                connection.send(content: line, completion: .contentProcessed { _ in })
-            }
+                  let line = try? LocationWireFormat.encodeLine(packet) else { return }
+            sendToAll(line)
+        }
+    }
+
+    /// Encode `status` as a single JSON line, cache it (for late-joining clients),
+    /// and send it to every connected client. Cached even with no clients so the
+    /// next one to connect gets it.
+    func broadcast(deviceStatus status: DeviceStatusPacket) {
+        queue.async { [self] in
+            guard let line = try? LocationWireFormat.encodeLine(status) else { return }
+            latestDeviceStatusLine = line
+            sendToAll(line)
+        }
+    }
+
+    private func sendToAll(_ line: Data) {
+        for connection in connections.values {
+            connection.send(content: line, completion: .contentProcessed { _ in })
         }
     }
 
@@ -149,6 +170,10 @@ final class LocationBroadcaster: @unchecked Sendable {
             }
         }
         connection.start(queue: queue)
+        // Hand a late-joining client the last known device status right away.
+        if let line = latestDeviceStatusLine {
+            connection.send(content: line, completion: .contentProcessed { _ in })
+        }
         updateStatus { $0.clientCount = connections.count }
     }
 

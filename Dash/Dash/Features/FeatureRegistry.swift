@@ -66,9 +66,12 @@ extension FeatureRegistry {
     /// declared** — add a new `DashFeature` here; the shell does not change.
     static func makeDefault() -> FeatureRegistry {
         FeatureRegistry([
-            MapFeature(),
-            PlaceholderFeature.music(),
+            MapFeature(),                    // "Google Maps" — the real map feature
+            PlaceholderFeature.appleMaps(),
+            PlaceholderFeature.music(),      // "Apple Music"
+            PlaceholderFeature.weather(),
             PlaceholderFeature.speedometer(),
+            PlaceholderFeature.settings(),
         ])
     }
 }

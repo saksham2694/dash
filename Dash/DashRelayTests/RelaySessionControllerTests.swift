@@ -20,14 +20,28 @@ final class StubRelayTracker: RelayTracking {
     func stop() { stopCount += 1 }
 }
 
+@MainActor
+final class StubRelayDeviceStatusTracker: RelayDeviceStatusTracking {
+    var onStatusChange: ((DeviceStatusPacket) -> Void)?
+    var latest: DeviceStatusPacket?
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    func start() { startCount += 1 }
+    func stop() { stopCount += 1 }
+
+    func emit(_ status: DeviceStatusPacket) { latest = status; onStatusChange?(status) }
+}
+
 final class StubRelayBroadcaster: RelayBroadcasting, @unchecked Sendable {
     var onStatusChange: (@MainActor @Sendable (LocationBroadcaster.Status) -> Void)?
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var broadcastCount = 0
+    private(set) var deviceStatusBroadcasts: [DeviceStatusPacket] = []
     func start() { startCount += 1 }
     func stop() { stopCount += 1 }
     func broadcast(_ packet: LocationPacket) { broadcastCount += 1 }
+    func broadcast(deviceStatus status: DeviceStatusPacket) { deviceStatusBroadcasts.append(status) }
 
     @MainActor func emit(_ status: LocationBroadcaster.Status) { onStatusChange?(status) }
 }
@@ -36,11 +50,12 @@ final class StubRelayBroadcaster: RelayBroadcasting, @unchecked Sendable {
 @Suite("RelaySessionController")
 struct RelaySessionControllerTests {
 
-    private func makeSUT() -> (RelaySessionController, StubRelayTracker, StubRelayBroadcaster) {
+    private func makeSUT() -> (RelaySessionController, StubRelayTracker, StubRelayDeviceStatusTracker, StubRelayBroadcaster) {
         let tracker = StubRelayTracker()
+        let deviceStatus = StubRelayDeviceStatusTracker()
         let broadcaster = StubRelayBroadcaster()
-        let controller = RelaySessionController(tracker: tracker, broadcaster: broadcaster)
-        return (controller, tracker, broadcaster)
+        let controller = RelaySessionController(tracker: tracker, deviceStatus: deviceStatus, broadcaster: broadcaster)
+        return (controller, tracker, deviceStatus, broadcaster)
     }
 
     private var packet: LocationPacket {
@@ -52,14 +67,14 @@ struct RelaySessionControllerTests {
 
     @Test("starts stopped")
     func initialState() {
-        let (controller, _, _) = makeSUT()
+        let (controller, _, _, _) = makeSUT()
         #expect(controller.state == .stopped)
         #expect(controller.isTrackingLocation == false)
     }
 
     @Test("start → waiting, and begins advertising + GPS")
     func startEntersWaiting() {
-        let (controller, tracker, broadcaster) = makeSUT()
+        let (controller, tracker, _, broadcaster) = makeSUT()
 
         controller.start()
 
@@ -71,7 +86,7 @@ struct RelaySessionControllerTests {
 
     @Test("waiting → connected when a dashboard connects, and back to waiting")
     func clientConnectAndDisconnect() {
-        let (controller, _, broadcaster) = makeSUT()
+        let (controller, _, _, broadcaster) = makeSUT()
         controller.start()
 
         broadcaster.emit(.init(isListening: true, clientCount: 1))
@@ -83,7 +98,7 @@ struct RelaySessionControllerTests {
 
     @Test("connected → stopped on a deliberate disconnect")
     func stopFromConnected() {
-        let (controller, tracker, broadcaster) = makeSUT()
+        let (controller, tracker, _, broadcaster) = makeSUT()
         controller.start()
         broadcaster.emit(.init(isListening: true, clientCount: 1))
 
@@ -99,7 +114,7 @@ struct RelaySessionControllerTests {
 
     @Test("stopping a relay session stops location tracking")
     func stopStopsTracking() {
-        let (controller, tracker, _) = makeSUT()
+        let (controller, tracker, _, _) = makeSUT()
         controller.start()
         #expect(tracker.startCount == 1)
 
@@ -111,7 +126,7 @@ struct RelaySessionControllerTests {
 
     @Test("a deliberate disconnect does not immediately reconnect")
     func deliberateDisconnectDoesNotReconnect() {
-        let (controller, tracker, broadcaster) = makeSUT()
+        let (controller, tracker, _, broadcaster) = makeSUT()
         controller.start()
         controller.stop()
 
@@ -126,7 +141,7 @@ struct RelaySessionControllerTests {
 
     @Test("start after a deliberate stop resumes the session")
     func startAfterStop() {
-        let (controller, tracker, broadcaster) = makeSUT()
+        let (controller, tracker, _, broadcaster) = makeSUT()
         controller.start()
         controller.stop()
 
@@ -141,8 +156,27 @@ struct RelaySessionControllerTests {
 
     @Test("GPS fixes are forwarded straight to the broadcaster")
     func fixesForwarded() {
-        let (_, tracker, broadcaster) = makeSUT()
+        let (_, tracker, _, broadcaster) = makeSUT()
         tracker.onPacket?(packet)
         #expect(broadcaster.broadcastCount == 1)
+    }
+
+    // MARK: - Device status forwarding (M5.7)
+
+    @Test("start / stop also gate device-status monitoring")
+    func startStopGateDeviceStatus() {
+        let (controller, _, deviceStatus, _) = makeSUT()
+        controller.start()
+        #expect(deviceStatus.startCount == 1)
+        controller.stop()
+        #expect(deviceStatus.stopCount == 1)
+    }
+
+    @Test("a device-status change is forwarded straight to the broadcaster")
+    func deviceStatusForwarded() {
+        let (_, _, deviceStatus, broadcaster) = makeSUT()
+        let status = DeviceStatusPacket(batteryLevel: 0.72, batteryState: .unplugged, timestamp: .init())
+        deviceStatus.emit(status)
+        #expect(broadcaster.deviceStatusBroadcasts == [status])
     }
 }

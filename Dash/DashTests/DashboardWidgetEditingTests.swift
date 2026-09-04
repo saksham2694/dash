@@ -4,10 +4,10 @@
 //
 //  M5.4.2 — the Dashboard widget-editing UI's testable core:
 //    • `DashboardLayoutEditor.firstFreeOrigin` — deterministic top-left first-fit.
-//    • `DashboardLayoutStore.addWidget` — auto-place + "no room" outcome.
+//    • `DashboardCollectionStore.addWidget` — auto-place + "no room" outcome.
 //    • `DashboardWidgetPickerView.offeredSizes` — only feature-supported sizes.
 //    • `WidgetHostView` size control / open behaviour.
-//    • add / remove / resize all persist through `DashboardLayoutStore`.
+//    • add / remove / resize all persist through `DashboardCollectionStore`.
 //
 
 import Foundation
@@ -137,11 +137,11 @@ struct FirstFreeOriginTests {
 // MARK: - Store: add widget with auto-placement
 
 @MainActor
-@Suite("DashboardLayoutStore.addWidget")
+@Suite("DashboardCollectionStore.addWidget")
 struct AddWidgetTests {
 
-    private func store(_ seed: DashboardLayout, _ defaults: UserDefaults) -> DashboardLayoutStore {
-        DashboardLayoutStore(seed: seed, defaults: defaults)
+    private func store(_ seed: DashboardLayout, _ defaults: UserDefaults) -> DashboardCollectionStore {
+        DashboardCollectionStore(seed: seed, defaults: defaults)
     }
 
     @Test("adds a widget at the first free slot and persists it")
@@ -160,7 +160,7 @@ struct AddWidgetTests {
         #expect(added?.size == .compact)
         #expect(added?.origin == GridPoint(column: 1, row: 0)) // right column, beside the large
 
-        let reloaded = DashboardLayoutStore(seed: seed, defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: seed, defaults: defaults)
         #expect(reloaded.layout.allPlacements.contains { $0.id == newID })
     }
 
@@ -281,7 +281,7 @@ struct WidgetHostEditingControlsTests {
 // MARK: - add / remove / resize persist through the store
 
 @MainActor
-@Suite("Dashboard editing round-trips through DashboardLayoutStore")
+@Suite("Dashboard editing round-trips through DashboardCollectionStore")
 struct DashboardEditingPersistenceTests {
 
     private let idA = UUID()
@@ -296,30 +296,30 @@ struct DashboardEditingPersistenceTests {
     @Test("adding a widget persists across a reload")
     func addPersists() {
         let defaults = ephemeralDefaults()
-        let s = DashboardLayoutStore(seed: seed(), defaults: defaults)
+        let s = DashboardCollectionStore(seed: seed(), defaults: defaults)
 
         _ = s.addWidget(featureID: "maps", size: .compact)
-        let reloaded = DashboardLayoutStore(seed: seed(), defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: seed(), defaults: defaults)
         #expect(reloaded.layout.allPlacements.count == 2)
     }
 
     @Test("removing a widget persists across a reload")
     func removePersists() {
         let defaults = ephemeralDefaults()
-        let s = DashboardLayoutStore(seed: seed(), defaults: defaults)
+        let s = DashboardCollectionStore(seed: seed(), defaults: defaults)
 
         #expect(s.removePlacement(id: idA) == true)
-        let reloaded = DashboardLayoutStore(seed: seed(), defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: seed(), defaults: defaults)
         #expect(reloaded.layout.allPlacements.isEmpty)
     }
 
     @Test("changing a widget's size persists across a reload")
     func resizePersists() {
         let defaults = ephemeralDefaults()
-        let s = DashboardLayoutStore(seed: seed(), defaults: defaults)
+        let s = DashboardCollectionStore(seed: seed(), defaults: defaults)
 
         #expect(s.updatePlacementSize(id: idA, to: .large) == true)
-        let reloaded = DashboardLayoutStore(seed: seed(), defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: seed(), defaults: defaults)
         #expect(reloaded.layout.allPlacements.first?.size == .large)
     }
 
@@ -331,12 +331,12 @@ struct DashboardEditingPersistenceTests {
             widget(.compact, at: GridPoint(column: 0, row: 0), id: idA),
             widget(.compact, at: GridPoint(column: 0, row: 2)),
         ])])
-        let s = DashboardLayoutStore(seed: two, defaults: defaults)
+        let s = DashboardCollectionStore(seed: two, defaults: defaults)
 
         #expect(s.updatePlacementSize(id: idA, to: .medium) == false)
         #expect(s.layout.allPlacements.first { $0.id == idA }?.size == .compact)
 
-        let reloaded = DashboardLayoutStore(seed: two, defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: two, defaults: defaults)
         #expect(reloaded.layout.allPlacements.first { $0.id == idA }?.size == .compact)
     }
 }

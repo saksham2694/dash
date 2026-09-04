@@ -2,16 +2,19 @@
 //  PlaceholderFeature.swift
 //  Dash
 //
-//  Registered-but-not-yet-implemented features. Music and the Speedometer are
-//  real Dash features (spec §6, §7) — they belong in the sidebar and the Home
-//  launcher with their own identity now, not as dimmed "coming soon" stand-ins.
-//  Their runtime isn't built yet, so opening one full-screen shows a short
-//  "not set up yet" panel. They advertise no widget sizes, so the dashboard
-//  widget picker simply doesn't offer them until they ship.
+//  Registered-but-not-yet-implemented features. Apple Maps, Apple Music, Weather,
+//  the Speedometer and Settings are real Dash features — they belong in the
+//  sidebar and the Home launcher with their own identity now, not as dimmed
+//  "coming soon" stand-ins. Their runtime isn't built yet, so opening one
+//  full-screen shows a short "not set up yet" panel. They advertise no widget
+//  sizes, so the dashboard widget picker simply doesn't offer them until they
+//  ship.
 //
-//  When Music / Speedometer are implemented for real, each gets its own file
-//  (`MusicFeature`, `SpeedometerFeature`) and this one goes away — the id and
-//  manifest identity carry over so persisted Home placements keep resolving.
+//  When a feature is implemented for real it gets its own file (e.g.
+//  `SettingsFeature`) and drops out of here — the **id** and manifest identity
+//  carry over unchanged, so persisted Home placements and navigation references
+//  keep resolving. `settings` in particular is a deliberately stable id for the
+//  future `SettingsFeature`.
 //
 
 import SwiftUI
@@ -57,9 +60,29 @@ final class PlaceholderFeature: DashFeature {
 
 extension PlaceholderFeature {
 
+    /// Stable feature ids. A future real feature reuses its id verbatim.
+    enum ID {
+        static let appleMaps = "apple-maps"
+        static let music = "music"
+        static let weather = "weather"
+        static let speedometer = "speedometer"
+        static let settings = "settings"
+    }
+
+    static func appleMaps() -> PlaceholderFeature {
+        PlaceholderFeature(
+            id: ID.appleMaps,
+            title: "Apple Maps",
+            symbolName: "map.fill",
+            tint: .blue,
+            iconAssetName: "app-icon-apple-maps",
+            blurb: "An Apple Maps view will join Google Maps as a map provider."
+        )
+    }
+
     static func music() -> PlaceholderFeature {
         PlaceholderFeature(
-            id: "music",
+            id: ID.music,
             title: "Apple Music",
             symbolName: "music.note",
             tint: .pink,
@@ -68,14 +91,36 @@ extension PlaceholderFeature {
         )
     }
 
+    static func weather() -> PlaceholderFeature {
+        PlaceholderFeature(
+            id: ID.weather,
+            title: "Weather",
+            symbolName: "cloud.sun.fill",
+            tint: .teal,
+            iconAssetName: "app-icon-weather",
+            blurb: "A glanceable weather widget is on the way."
+        )
+    }
+
     static func speedometer() -> PlaceholderFeature {
         PlaceholderFeature(
-            id: "speedometer",
+            id: ID.speedometer,
             title: "Speedometer",
             symbolName: "speedometer",
             tint: .orange,
             iconAssetName: "app-icon-speedometer",
             blurb: "A large speed readout and trip computer are on the way."
+        )
+    }
+
+    static func settings() -> PlaceholderFeature {
+        PlaceholderFeature(
+            id: ID.settings,
+            title: "Settings",
+            symbolName: "gearshape.fill",
+            tint: .graphite,
+            iconAssetName: "app-icon-settings",
+            blurb: "Appearance, dashboard and connection preferences are on the way."
         )
     }
 }

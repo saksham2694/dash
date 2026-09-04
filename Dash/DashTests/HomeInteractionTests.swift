@@ -156,7 +156,7 @@ struct HomePagingShellTests {
                 seed: .paginate(featureIDs: homeApps, capacity: capacity),
                 defaults: UserDefaults(suiteName: "pager-h-\(UUID().uuidString)")!
             ),
-            dashboardLayout: DashboardLayoutStore(
+            dashboards: DashboardCollectionStore(
                 seed: .starter(featureID: "maps"),
                 defaults: UserDefaults(suiteName: "pager-d-\(UUID().uuidString)")!
             ),

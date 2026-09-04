@@ -13,6 +13,9 @@ struct DashApp: App {
     /// Single source of truth for received location data.
     @StateObject private var locationStore: LocationStore
 
+    /// Single source of truth for received device/relay status (iPhone battery).
+    @StateObject private var deviceStatus: DeviceStatusStore
+
     /// Connection/session layer — owns the transport lifecycle and connection state.
     @StateObject private var connection: ConnectionCoordinator
 
@@ -23,10 +26,11 @@ struct DashApp: App {
     /// lifetime; declared in `FeatureRegistry.makeDefault()`.
     @StateObject private var registry: FeatureRegistry
 
-    /// Persisted widget-dashboard arrangement. Seeded with a starter layout for
-    /// the Map feature (the shell stays feature-agnostic; the seed is wired
-    /// here, next to the feature registry).
-    @StateObject private var dashboardLayout: DashboardLayoutStore
+    /// Persisted dashboard collection (M5.6). A fresh install has one dashboard,
+    /// seeded with a starter layout for the Map feature; the user can add more.
+    /// The shell stays feature-agnostic — the seed is wired here, next to the
+    /// feature registry.
+    @StateObject private var dashboards: DashboardCollectionStore
 
     /// Persisted App-Home arrangement. Seeded from the registered feature ids.
     @StateObject private var homeLayout: HomeLayoutStore
@@ -42,14 +46,20 @@ struct DashApp: App {
         GooglePlacesConfiguration.bootstrap()
 
         let store = LocationStore()
+        let deviceStatusStore = DeviceStatusStore()
         let known = KnownDeviceStore()
         _locationStore = StateObject(wrappedValue: store)
+        _deviceStatus = StateObject(wrappedValue: deviceStatusStore)
         _knownDevices = StateObject(wrappedValue: known)
-        _connection = StateObject(wrappedValue: ConnectionCoordinator(locationStore: store, knownDevices: known))
+        _connection = StateObject(wrappedValue: ConnectionCoordinator(
+            locationStore: store,
+            deviceStatusStore: deviceStatusStore,
+            knownDevices: known
+        ))
 
         let features = FeatureRegistry.makeDefault()
         _registry = StateObject(wrappedValue: features)
-        _dashboardLayout = StateObject(wrappedValue: DashboardLayoutStore(seed: .starter(featureID: MapFeature.id)))
+        _dashboards = StateObject(wrappedValue: DashboardCollectionStore(seed: .starter(featureID: MapFeature.id)))
         _homeLayout = StateObject(wrappedValue: HomeLayoutStore(
             seed: .paginate(featureIDs: features.manifests.map(\.id), capacity: HomeGrid.capacity)
         ))
@@ -59,10 +69,11 @@ struct DashApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(locationStore)
+                .environmentObject(deviceStatus)
                 .environmentObject(connection)
                 .environmentObject(knownDevices)
                 .environmentObject(registry)
-                .environmentObject(dashboardLayout)
+                .environmentObject(dashboards)
                 .environmentObject(homeLayout)
                 .environmentObject(wallpaper)
                 .task { connection.startSession() }

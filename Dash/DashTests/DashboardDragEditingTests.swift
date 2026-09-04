@@ -8,7 +8,7 @@
 //      `proposedOrigin` (translation applied once as a pure delta — the fix for
 //      the drag oscillation).
 //    • `DashboardResizeStepper` — a resize drag steps through supported sizes.
-//    • `DashboardLayoutStore.canMovePlacement` / `canResizePlacement` — the
+//    • `DashboardCollectionStore.canMovePlacement` / `canResizePlacement` — the
 //      non-persisting validity checks that drive live feedback.
 //    • The commit path (`movePlacement` / `updatePlacementSize`) persists only a
 //      final valid placement; an invalid / cancelled interaction changes nothing.
@@ -201,7 +201,7 @@ struct DashboardResizeStepperTests {
 // MARK: - Store: non-persisting validity checks
 
 @MainActor
-@Suite("DashboardLayoutStore interaction queries")
+@Suite("DashboardCollectionStore interaction queries")
 struct InteractionQueryTests {
 
     private let idA = UUID()
@@ -209,8 +209,8 @@ struct InteractionQueryTests {
 
     /// idA compact @ (0,0) [rows 0..2], idB compact @ (0,2) [rows 2..4] — same
     /// column, edge-adjacent, valid.
-    private func stackedCompacts(_ defaults: UserDefaults) -> DashboardLayoutStore {
-        DashboardLayoutStore(
+    private func stackedCompacts(_ defaults: UserDefaults) -> DashboardCollectionStore {
+        DashboardCollectionStore(
             seed: layout([
                 widget(.compact, at: GridPoint(column: 0, row: 0), id: idA),
                 widget(.compact, at: GridPoint(column: 0, row: 2), id: idB),
@@ -245,7 +245,7 @@ struct InteractionQueryTests {
         #expect(s.canResizePlacement(id: idA, to: .compact) == true)  // no change
 
         // A solo compact can grow to large.
-        let solo = DashboardLayoutStore(
+        let solo = DashboardCollectionStore(
             seed: layout([widget(.compact, at: GridPoint(column: 0, row: 0), id: idA)]),
             defaults: ephemeralDefaults()
         )
@@ -275,7 +275,7 @@ struct DragCommitPersistenceTests {
     @Test("a full valid move — snap, check, commit — persists")
     func validMovePersists() {
         let defaults = ephemeralDefaults()
-        let store = DashboardLayoutStore(seed: seed(), defaults: defaults)
+        let store = DashboardCollectionStore(seed: seed(), defaults: defaults)
 
         // What `handleMove` does: snap the dragged point, verify, then commit.
         let geo = DashboardGridGeometry(grid: .standard, canvas: CGSize(width: 600, height: 600), gap: 0)
@@ -288,14 +288,14 @@ struct DragCommitPersistenceTests {
         #expect(store.movePlacement(id: idA, to: snapped) == true)
         #expect(store.layout.allPlacements.first { $0.id == idA }?.origin == snapped)
 
-        let reloaded = DashboardLayoutStore(seed: seed(), defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: seed(), defaults: defaults)
         #expect(reloaded.layout.allPlacements.first { $0.id == idA }?.origin == snapped)
     }
 
     @Test("an invalid drop is never committed — the layout and disk are unchanged")
     func invalidMoveLeavesLayoutUnchanged() {
         let defaults = ephemeralDefaults()
-        let store = DashboardLayoutStore(seed: seed(), defaults: defaults)
+        let store = DashboardCollectionStore(seed: seed(), defaults: defaults)
         let before = signature(store.layout)
 
         // Proposed drop lands on idB → invalid, so `handleMove` keeps lastValid
@@ -305,14 +305,14 @@ struct DragCommitPersistenceTests {
         // commit is skipped because lastValidOrigin == startOrigin
         #expect(signature(store.layout) == before)
 
-        let reloaded = DashboardLayoutStore(seed: seed(), defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: seed(), defaults: defaults)
         #expect(signature(reloaded.layout) == before)
     }
 
     @Test("a drag that ends back where it started writes nothing new")
     func noOpMoveIsClean() {
         let defaults = ephemeralDefaults()
-        let store = DashboardLayoutStore(seed: seed(), defaults: defaults)
+        let store = DashboardCollectionStore(seed: seed(), defaults: defaults)
         let before = signature(store.layout)
 
         // lastValidOrigin == startOrigin → handleMove skips the commit entirely.
@@ -326,20 +326,20 @@ struct DragCommitPersistenceTests {
 
         // Solo compact → grow to large (valid).
         let soloSeed = layout([widget(.compact, at: GridPoint(column: 0, row: 0), id: idA)], pageID: pageID)
-        let solo = DashboardLayoutStore(seed: soloSeed, defaults: defaults)
+        let solo = DashboardCollectionStore(seed: soloSeed, defaults: defaults)
         #expect(solo.canResizePlacement(id: idA, to: .large))
         #expect(solo.updatePlacementSize(id: idA, to: .large) == true)
-        #expect(DashboardLayoutStore(seed: soloSeed, defaults: defaults)
+        #expect(DashboardCollectionStore(seed: soloSeed, defaults: defaults)
             .layout.allPlacements.first?.size == .large)
 
         // Two compacts → grow idA to medium (overlap) is refused, disk untouched.
         let pairDefaults = ephemeralDefaults()
-        let pair = DashboardLayoutStore(seed: seed(), defaults: pairDefaults)
+        let pair = DashboardCollectionStore(seed: seed(), defaults: pairDefaults)
         let before = signature(pair.layout)
         #expect(pair.canResizePlacement(id: idA, to: .medium) == false)
         #expect(pair.updatePlacementSize(id: idA, to: .medium) == false)
         #expect(signature(pair.layout) == before)
-        #expect(signature(DashboardLayoutStore(seed: seed(), defaults: pairDefaults).layout) == before)
+        #expect(signature(DashboardCollectionStore(seed: seed(), defaults: pairDefaults).layout) == before)
     }
 }
 

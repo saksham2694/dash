@@ -175,7 +175,7 @@ struct HomeLayoutStoreTests {
 
     @Test("the storage key and schema version are the documented constants")
     func constants() {
-        #expect(HomeLayoutStore.storageKey == "shell.homeLayout.v1")
+        #expect(HomeLayoutStore.storageKey == "shell.homeLayout.v2")
         #expect(HomeLayoutStore.schemaVersion == 1)
     }
 }

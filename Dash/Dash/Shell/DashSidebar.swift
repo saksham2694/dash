@@ -7,8 +7,8 @@
 //
 //    TOP     — a status cluster, VERTICALLY stacked: the current time (a small
 //              one-line status element, not a title), the paired-iPhone chip
-//              (tap → Disconnect / Forget), a GPS-state dot, and a placeholder
-//              phone-battery slot.
+//              (tap → Disconnect / Forget), a GPS-state dot, and the iPhone
+//              battery (real telemetry from DashRelay — M5.7).
 //    MIDDLE  — recent / registered feature icons (Maps today; new features
 //              appear here automatically from `FeatureRegistry`). Icon-only.
 //    BOTTOM  — ONE control that toggles between the Dashboard and Home.
@@ -18,6 +18,7 @@
 //  `ConnectionCoordinator` / `LocationStore` for status but owns none of it.
 //
 
+import DashShared
 import SwiftUI
 
 struct DashSidebar: View {
@@ -25,6 +26,7 @@ struct DashSidebar: View {
     @ObservedObject var shell: ShellStore
     @ObservedObject var connection: ConnectionCoordinator
     @ObservedObject var location: LocationStore
+    @ObservedObject var deviceStatus: DeviceStatusStore
 
     /// Registered features, in order — the rail's app icons.
     let manifests: [FeatureManifest]
@@ -74,6 +76,7 @@ struct DashSidebar: View {
             DashStatusCluster(
                 connection: connection,
                 location: location,
+                deviceStatus: deviceStatus,
                 onDisconnect: onDisconnect,
                 onForget: onForget
             )
@@ -125,8 +128,17 @@ private struct DashStatusCluster: View {
 
     @ObservedObject var connection: ConnectionCoordinator
     @ObservedObject var location: LocationStore
+    @ObservedObject var deviceStatus: DeviceStatusStore
     let onDisconnect: () -> Void
     let onForget: () -> Void
+
+    private var battery: DashBatteryStatus {
+        DashBatteryFormatter.status(
+            percent: deviceStatus.batteryPercent,
+            state: deviceStatus.batteryState,
+            freshness: deviceStatus.freshness
+        )
+    }
 
     var body: some View {
         VStack(spacing: DashMetrics.spacingSmall) {
@@ -156,20 +168,29 @@ private struct DashStatusCluster: View {
             )
             .accessibilityLabel(DashStatusModel.gpsLabel(isSignalLost: location.isSignalLost, hasFix: location.hasFix))
 
-            // Placeholder phone-battery slot — no real data yet, just reserved.
-            HStack(spacing: DashMetrics.spacingTight) {
-                Image(systemName: "battery.100")
-                    .font(.system(size: 13, weight: .semibold))
-                Text("—")
-                    .font(.system(size: 11, weight: .semibold))
-                    .monospacedDigit()
-            }
-            .foregroundStyle(Color.dashTextTertiary)
-            .frame(maxWidth: .infinity)
-            .frame(height: 22)
-            .accessibilityLabel("Phone battery unavailable")
+            // iPhone battery — real telemetry from DashRelay (M5.7). An
+            // intentional unavailable glyph when no reading has arrived.
+            batteryRow
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var batteryRow: some View {
+        HStack(spacing: DashMetrics.spacingTight) {
+            Image(systemName: battery.symbolName)
+                .font(.system(size: 13, weight: .semibold))
+            if let text = battery.text {
+                Text(text)
+                    .font(.system(size: 11, weight: .semibold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+        }
+        .foregroundStyle(battery.isDimmed ? Color.dashTextTertiary : Color.dashTextSecondary)
+        .frame(maxWidth: .infinity)
+        .frame(height: 22)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(battery.accessibilityLabel)
     }
 
     private func statusRow(dot: Color, text: String) -> some View {

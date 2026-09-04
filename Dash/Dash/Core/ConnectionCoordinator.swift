@@ -47,6 +47,7 @@ final class ConnectionCoordinator: ObservableObject {
 
     private let receiver: any LocationReceiving
     private let locationStore: LocationStore
+    private let deviceStatusStore: DeviceStatusStore
     private let knownDevices: any KnownDeviceStoring
 
     /// Set when the user deliberately disconnects; cleared by `startSession()`.
@@ -54,21 +55,35 @@ final class ConnectionCoordinator: ObservableObject {
     /// nothing reconnects on its own.
     private var deliberatelyDisconnected = false
 
-    convenience init(locationStore: LocationStore, knownDevices: any KnownDeviceStoring) {
-        self.init(receiver: LocationReceiver(), locationStore: locationStore, knownDevices: knownDevices)
+    convenience init(
+        locationStore: LocationStore,
+        deviceStatusStore: DeviceStatusStore,
+        knownDevices: any KnownDeviceStoring
+    ) {
+        self.init(
+            receiver: LocationReceiver(),
+            locationStore: locationStore,
+            deviceStatusStore: deviceStatusStore,
+            knownDevices: knownDevices
+        )
     }
 
     init(
         receiver: any LocationReceiving,
         locationStore: LocationStore,
+        deviceStatusStore: DeviceStatusStore,
         knownDevices: any KnownDeviceStoring
     ) {
         self.receiver = receiver
         self.locationStore = locationStore
+        self.deviceStatusStore = deviceStatusStore
         self.knownDevices = knownDevices
 
         receiver.onPacket = { [weak self] packet in
             self?.locationStore.ingest(packet)
+        }
+        receiver.onDeviceStatus = { [weak self] status in
+            self?.deviceStatusStore.ingest(status)
         }
         receiver.onStatusChange = { [weak self] status in
             self?.handleTransportStatus(status)
@@ -120,6 +135,7 @@ final class ConnectionCoordinator: ObservableObject {
         connectedDisplayName = nil
         discoveredRelays = []
         locationStore.connectionEnded()
+        deviceStatusStore.connectionEnded()
     }
 
     /// First-time flow: the user picked a relay from the discovered list. Remember
@@ -152,6 +168,7 @@ final class ConnectionCoordinator: ObservableObject {
         connectedRelayID = nil
         connectedDisplayName = nil
         locationStore.connectionEnded()
+        deviceStatusStore.connectionEnded()
         deliberatelyDisconnected = false
         connectionState = .discovering
         receiver.start()

@@ -28,15 +28,28 @@ protocol RelayTracking: AnyObject {
     func stop()
 }
 
+/// The iPhone device-status source (battery). Same shape as `RelayTracking`:
+/// `start()`/`stop()` gate it, and it pushes a `DeviceStatusPacket` through
+/// `onStatusChange` only when the value meaningfully changes.
+@MainActor
+protocol RelayDeviceStatusTracking: AnyObject {
+    var onStatusChange: ((DeviceStatusPacket) -> Void)? { get set }
+    var latest: DeviceStatusPacket? { get }
+    func start()
+    func stop()
+}
+
 protocol RelayBroadcasting: AnyObject, Sendable {
     var onStatusChange: (@MainActor @Sendable (LocationBroadcaster.Status) -> Void)? { get set }
     func start()
     func stop()
     func broadcast(_ packet: LocationPacket)
+    func broadcast(deviceStatus status: DeviceStatusPacket)
 }
 
 extension LocationTracker: RelayTracking {}
 extension LocationBroadcaster: RelayBroadcasting {}
+extension DeviceStatusTracker: RelayDeviceStatusTracking {}
 
 // MARK: - Session controller
 
@@ -59,19 +72,34 @@ final class RelaySessionController: ObservableObject {
     @Published private(set) var isTrackingLocation = false
 
     private let tracker: any RelayTracking
+    private let deviceStatus: any RelayDeviceStatusTracking
     private let broadcaster: any RelayBroadcasting
 
     convenience init() {
-        self.init(tracker: LocationTracker(), broadcaster: LocationBroadcaster())
+        self.init(
+            tracker: LocationTracker(),
+            deviceStatus: DeviceStatusTracker(),
+            broadcaster: LocationBroadcaster()
+        )
     }
 
-    init(tracker: any RelayTracking, broadcaster: any RelayBroadcasting) {
+    init(
+        tracker: any RelayTracking,
+        deviceStatus: any RelayDeviceStatusTracking,
+        broadcaster: any RelayBroadcasting
+    ) {
         self.tracker = tracker
+        self.deviceStatus = deviceStatus
         self.broadcaster = broadcaster
 
         // Every GPS fix goes straight to the broadcaster, in the same callback.
         tracker.onPacket = { [broadcaster] packet in
             broadcaster.broadcast(packet)
+        }
+        // Battery changes are relayed the same way — only when the value/state
+        // meaningfully changes (see `DeviceStatusTracker`), not on a timer.
+        deviceStatus.onStatusChange = { [broadcaster] status in
+            broadcaster.broadcast(deviceStatus: status)
         }
         broadcaster.onStatusChange = { [weak self] status in
             self?.handleBroadcasterStatus(status)
@@ -80,20 +108,22 @@ final class RelaySessionController: ObservableObject {
 
     // MARK: - Session control
 
-    /// Begin advertising and tracking GPS. Explicit "go"; idempotent.
+    /// Begin advertising and tracking GPS + device status. Explicit "go"; idempotent.
     func start() {
         guard state == .stopped else { return }
         broadcaster.start()
         tracker.start()
+        deviceStatus.start()
         isTrackingLocation = true
         state = .waiting
     }
 
-    /// Deliberate disconnect: stop networking AND GPS. Nothing reconnects until
-    /// `start()` is called again.
+    /// Deliberate disconnect: stop networking, GPS AND device-status monitoring.
+    /// Nothing reconnects until `start()` is called again.
     func stop() {
         broadcaster.stop()
         tracker.stop()
+        deviceStatus.stop()
         isTrackingLocation = false
         state = .stopped
     }

@@ -94,39 +94,52 @@ struct FeatureIconIdentityTests {
         }
 
         #expect(tint("maps") == .green)
+        #expect(tint("apple-maps") == .blue)
         #expect(tint("music") == .pink)
+        #expect(tint("weather") == .teal)
         #expect(tint("speedometer") == .orange)
+        #expect(tint("settings") == .graphite)
 
         // A coherent family: no two share a tint.
         let tints = registry.manifests.map { DashAppIcon.tint(for: $0.iconStyle, id: $0.id) }
         #expect(Set(tints).count == tints.count)
     }
 
-    @Test("the registered features carry their real product names")
-    func realFeatureNames() {
+    @Test("the six registered features are present, in the fixed sidebar order, with their real names")
+    func sixFeaturesInOrder() {
         let registry = FeatureRegistry.makeDefault()
-        #expect(registry.feature("maps")?.manifest.title == "Google Maps")
-        #expect(registry.feature("music")?.manifest.title == "Apple Music")
-        #expect(registry.feature("speedometer")?.manifest.title == "Speedometer")
+        #expect(registry.manifests.map(\.id) == ["maps", "apple-maps", "music", "weather", "speedometer", "settings"])
+        #expect(registry.manifests.map(\.title) == [
+            "Google Maps", "Apple Maps", "Apple Music", "Weather", "Speedometer", "Settings",
+        ])
     }
 
     @Test("each feature names the local icon asset the private build should use")
     func iconAssetIdentifiers() {
         let registry = FeatureRegistry.makeDefault()
         #expect(registry.feature("maps")?.manifest.iconAssetName == "app-icon-google-maps")
+        #expect(registry.feature("apple-maps")?.manifest.iconAssetName == "app-icon-apple-maps")
         #expect(registry.feature("music")?.manifest.iconAssetName == "app-icon-apple-music")
+        #expect(registry.feature("weather")?.manifest.iconAssetName == "app-icon-weather")
         #expect(registry.feature("speedometer")?.manifest.iconAssetName == "app-icon-speedometer")
+        #expect(registry.feature("settings")?.manifest.iconAssetName == "app-icon-settings")
     }
 
-    @Test("a not-yet-built feature advertises no dashboard widget size")
+    @Test("every not-yet-built feature advertises no dashboard widget size")
     func placeholdersHaveNoWidgets() {
         let registry = FeatureRegistry.makeDefault()
-        #expect(registry.feature("music")?.manifest.supportedWidgetSizes.isEmpty == true)
-        #expect(registry.feature("speedometer")?.manifest.supportedWidgetSizes.isEmpty == true)
-
-        // …so the Add-Widget picker only offers the features that have one.
+        for id in ["apple-maps", "music", "weather", "speedometer", "settings"] {
+            #expect(registry.feature(id)?.manifest.supportedWidgetSizes.isEmpty == true)
+        }
+        // …so the Add-Widget picker only offers Google Maps (the one real feature).
         let placeable = DashboardWidgetPickerView.placeableFeatures(registry.manifests).map(\.id)
         #expect(placeable == ["maps"])
+    }
+
+    @Test("Settings keeps a stable id for a future real SettingsFeature")
+    func settingsIdIsStable() {
+        #expect(PlaceholderFeature.ID.settings == "settings")
+        #expect(FeatureRegistry.makeDefault().feature("settings")?.manifest.title == "Settings")
     }
 }
 

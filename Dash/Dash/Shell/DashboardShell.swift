@@ -39,9 +39,10 @@ struct DashboardShell: View {
 
     @EnvironmentObject private var connection: ConnectionCoordinator
     @EnvironmentObject private var registry: FeatureRegistry
-    @EnvironmentObject private var layoutStore: DashboardLayoutStore
+    @EnvironmentObject private var dashboards: DashboardCollectionStore
     @EnvironmentObject private var homeLayout: HomeLayoutStore
     @EnvironmentObject private var locationStore: LocationStore
+    @EnvironmentObject private var deviceStatus: DeviceStatusStore
 
     @StateObject private var shell = ShellStore()
 
@@ -80,6 +81,7 @@ struct DashboardShell: View {
                 shell: shell,
                 connection: connection,
                 location: locationStore,
+                deviceStatus: deviceStatus,
                 manifests: registry.manifests,
                 onDisconnect: { connection.disconnect() },
                 onForget: { connection.forgetPairedRelay() }
@@ -108,7 +110,7 @@ struct DashboardShell: View {
             SpacePagerView(
                 shell: shell,
                 homeLayout: homeLayout,
-                dashboardLayout: layoutStore,
+                dashboards: dashboards,
                 dashboardEdit: dashboardEdit,
                 registry: registry,
                 grid: grid

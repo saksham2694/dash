@@ -39,8 +39,12 @@ final class LocationReceiver: @unchecked Sendable {
         var connectedDisplayName: String?
     }
 
-    /// Called on the main actor for every decoded packet, in arrival order.
+    /// Called on the main actor for every decoded GPS packet, in arrival order.
     var onPacket: (@MainActor @Sendable (LocationPacket) -> Void)?
+
+    /// Called on the main actor for every decoded device-status packet (iPhone
+    /// battery etc.), in arrival order.
+    var onDeviceStatus: (@MainActor @Sendable (DeviceStatusPacket) -> Void)?
 
     /// Called on the main actor whenever `Status` changes.
     var onStatusChange: (@MainActor @Sendable (Status) -> Void)?
@@ -245,11 +249,17 @@ final class LocationReceiver: @unchecked Sendable {
             guard let self else { return }
 
             if let data, !data.isEmpty {
-                let packets = self.lineBuffer.append(data)
-                if !packets.isEmpty {
-                    let deliver = self.onPacket
+                let messages = self.lineBuffer.append(data)
+                if !messages.isEmpty {
+                    let deliverPacket = self.onPacket
+                    let deliverStatus = self.onDeviceStatus
                     Task { @MainActor in
-                        for packet in packets { deliver?(packet) }
+                        for message in messages {
+                            switch message {
+                            case .location(let packet): deliverPacket?(packet)
+                            case .deviceStatus(let status): deliverStatus?(status)
+                            }
+                        }
                     }
                 }
             }

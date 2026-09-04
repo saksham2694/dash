@@ -2921,3 +2921,99 @@ Status: Implemented. Physical iPad acceptance test PASSED.
   (`ShellDiagnostics.logKeyboardGeometry = false`).
 - DashTests: 526/526. Build clean.
 - Nothing committed.
+
+## M5.6 — Multiple dashboards + six-feature sidebar
+
+Status: Implemented. Physically tested on the real iPad — multiple dashboards
+and the six-feature sidebar both PASSED.
+
+Multiple dashboards (Part A):
+- New `DashboardCollection` value type (records = stable id + name + independent
+  `DashboardLayout`) and `DashboardCollectionStore` — the one layer for records /
+  active dashboard / add / remove / select / rename / persistence / migration.
+  Replaces `DashboardLayoutStore`; the validated widget-mutation vocabulary is
+  unchanged and now scopes to the active dashboard, still through the pure
+  `DashboardLayoutEditor` / `DashboardLayoutValidator`.
+- Fresh install: exactly one dashboard ("Dashboard", Map starter layout). Added
+  dashboards start empty and become active. Removal never allows zero; removing
+  the active one deterministically re-selects the dashboard in its slot.
+- Persistence: `shell.dashboards.v1` versioned envelope. Migration from the
+  single-dashboard `shell.dashboardLayout.v2` key → one dashboard with that exact
+  layout; new format persisted, legacy key removed → no duplication on relaunch.
+  Invalid / wrong-version → fresh single dashboard.
+- UI: an unobtrusive dashboard-name pill (top-leading, shown only when >1
+  dashboard or while editing) opens `DashboardManagerView` (switch / add / rename
+  / delete). `SpacePagerView` and the Dashboard↔Home navigation model unchanged —
+  dashboards are not pager pages. Features remain unaware the collection exists.
+
+Six-feature sidebar (Part B):
+- Registered in fixed order: Google Maps (real), Apple Maps, Apple Music,
+  Weather, Speedometer, Settings. Apple Maps / Weather / Settings are new
+  `PlaceholderFeature`s with stable ids; `settings` is reserved for a future real
+  `SettingsFeature`. Apple Music / Speedometer unchanged.
+- Icons via the existing `DashLocalAssets` path (`app-icon-<name>`), all six
+  local files present + git-ignored; SF-symbol + tint fallback if absent.
+- `HomeLayoutStore` bumped to `.v2` so an existing install's Home also shows the
+  six features (no Home customisation exists — nothing lost).
+
+- DashTests: 550/550, 0 failed, 0 skipped. Build clean.
+- Nothing committed.
+
+## M5.7 — Real DashRelay battery telemetry
+
+Status: Implemented. Physically tested on the real iPad — iPhone battery
+telemetry PASSED; GPS/location unaffected.
+
+Telemetry contract (separate from location):
+- New `DeviceStatusPacket` + `RelayMessage` in `DashShared`. `LocationPacket` is
+  untouched — device status is a second line kind on the same TCP stream, with a
+  `kind` discriminator; `LocationWireFormat.decodeMessage` routes each line
+  (device-status first, else location). `PacketLineBuffer` now yields
+  `[RelayMessage]`. The location wire bytes are byte-identical to before.
+- `DeviceStatusPacket`: `batteryLevel` (0…1 or nil when unknown), `BatteryState`
+  (`unknown`/`unplugged`/`charging`/`full` — platform-neutral mirror of UIKit),
+  `timestamp`. Designed to grow (future relay/device fields) without touching
+  `LocationPacket`.
+
+DashRelay (iPhone) battery source:
+- New `DeviceStatusTracker` wraps `UIDevice` battery monitoring — enabled on
+  `start()`, disabled on `stop()`. Event-driven via
+  `batteryLevelDidChange` / `batteryStateDidChange`; emits a packet only when the
+  whole-percent bucket or the charging state actually changes (no polling loop).
+- `RelaySessionController` gates it alongside GPS. `LocationBroadcaster` sends
+  device-status lines and caches the last one, resending it to any late-joining
+  client so a dashboard connecting between changes still gets a value promptly.
+
+iPad side:
+- New `DeviceStatusStore` — the source of truth for device/relay status, separate
+  from `LocationStore`. Owns `batteryLevel` / `batteryState` / `freshness`
+  (`unavailable` before the first packet, `live` while connected with data,
+  `stale` after a disconnect or a long grace gap — last value kept for display).
+  `ConnectionCoordinator` feeds it (`receiver.onDeviceStatus → ingest`) and calls
+  `connectionEnded()` on disconnect/forget. `DashboardShell` never parses packets.
+
+Sidebar:
+- The meaningless "—" placeholder is removed. The battery row now renders real
+  telemetry via the pure, tested `DashBatteryFormatter`: `N%`, a charging bolt
+  glyph, `Full`, and an intentional dimmed unavailable glyph (never a dash) when
+  no reading has arrived; a dimmed "last known" percentage when stale. M5.5
+  visual treatment unchanged; status area is now Phone / GPS / Battery with no
+  empty slot.
+
+Architecture note: battery is app/shell infrastructure (like `LocationStore` /
+`ConnectionCoordinator`), not a `DashFeature` — no new package, no coupling to
+`DashboardShell` or the feature system.
+
+Tests / build:
+- `DashShared` (`swift test`): 16/16 pass (+9 new — `DeviceStatusPacket`
+  encode/decode, level clamping, wire routing, disjointness from `LocationPacket`).
+- Dash, DashRelay, DashShared all build clean (Debug).
+- New: `DeviceStatusStoreTests`, `DashBatteryStatusTests` (Dash);
+  `DeviceStatusTrackerTests`, device-status forwarding in `RelaySessionControllerTests`
+  (DashRelay); device-status routing in `PacketLineBufferTests` +
+  `DeviceStatusPacketTests` (DashShared). Existing location networking tests
+  migrated for the `[RelayMessage]` framing.
+- The full Dash-scheme / DashRelay-scheme xcodebuild test runs were not
+  re-completed this session (simulator-install flake under concurrent runs, not a
+  test failure); to be re-run.
+- Nothing committed.

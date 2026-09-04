@@ -6,7 +6,7 @@
 //    • `DashboardEditModel` — the transient edit-mode flag.
 //    • `WidgetHostView` disables tap-to-open while editing.
 //    • `DashboardLayoutEditor` — pure layout transforms.
-//    • `DashboardLayoutStore`'s validated mutation API (remove / resize / add /
+//    • `DashboardCollectionStore`'s validated mutation API (remove / resize / add /
 //      move) — validates with `DashboardLayoutValidator` before persisting, and
 //      rejects (leaving the store untouched) anything structurally invalid.
 //
@@ -188,8 +188,8 @@ struct DashboardLayoutEditorTests {
 // MARK: - Validated mutation API on the store
 
 @MainActor
-@Suite("DashboardLayoutStore customization")
-struct DashboardLayoutStoreCustomizationTests {
+@Suite("DashboardCollectionStore customization")
+struct DashboardCollectionStoreCustomizationTests {
 
     private let idA = UUID()
     private let idB = UUID()
@@ -203,8 +203,8 @@ struct DashboardLayoutStoreCustomizationTests {
         ])])
     }
 
-    private func store(_ defaults: UserDefaults) -> DashboardLayoutStore {
-        DashboardLayoutStore(seed: baseLayout(), defaults: defaults)
+    private func store(_ defaults: UserDefaults) -> DashboardCollectionStore {
+        DashboardCollectionStore(seed: baseLayout(), defaults: defaults)
     }
 
     // MARK: remove
@@ -217,7 +217,7 @@ struct DashboardLayoutStoreCustomizationTests {
         #expect(s.removePlacement(id: idA) == true)
         #expect(s.layout.allPlacements.map(\.id) == [idB])
 
-        let reloaded = DashboardLayoutStore(seed: baseLayout(), defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: baseLayout(), defaults: defaults)
         #expect(signature(reloaded.layout) == signature(s.layout))
     }
 
@@ -239,12 +239,12 @@ struct DashboardLayoutStoreCustomizationTests {
         let solo = DashboardLayout(pages: [DashboardPage(id: pageID, placements: [
             widget(idA, .compact, at: GridPoint(column: 0, row: 0)),
         ])])
-        let s = DashboardLayoutStore(seed: solo, defaults: defaults)
+        let s = DashboardCollectionStore(seed: solo, defaults: defaults)
 
         #expect(s.updatePlacementSize(id: idA, to: .large) == true)
         #expect(s.layout.allPlacements.first?.size == .large)
 
-        let reloaded = DashboardLayoutStore(seed: solo, defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: solo, defaults: defaults)
         #expect(reloaded.layout.allPlacements.first?.size == .large)
     }
 
@@ -258,7 +258,7 @@ struct DashboardLayoutStoreCustomizationTests {
         #expect(s.updatePlacementSize(id: idA, to: .medium) == false)
         #expect(signature(s.layout) == before)
 
-        let reloaded = DashboardLayoutStore(seed: baseLayout(), defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: baseLayout(), defaults: defaults)
         #expect(signature(reloaded.layout) == before)
     }
 
@@ -269,7 +269,7 @@ struct DashboardLayoutStoreCustomizationTests {
         let low = DashboardLayout(pages: [DashboardPage(id: pageID, placements: [
             widget(idA, .compact, at: GridPoint(column: 0, row: 4)),
         ])])
-        let s = DashboardLayoutStore(seed: low, defaults: defaults)
+        let s = DashboardCollectionStore(seed: low, defaults: defaults)
 
         #expect(s.updatePlacementSize(id: idA, to: .medium) == false)
         #expect(s.layout.allPlacements.first?.size == .compact)
@@ -286,7 +286,7 @@ struct DashboardLayoutStoreCustomizationTests {
         #expect(s.addPlacement(added) == true)
         #expect(s.layout.allPlacements.map(\.id) == [idA, idB, added.id])
 
-        let reloaded = DashboardLayoutStore(seed: baseLayout(), defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: baseLayout(), defaults: defaults)
         #expect(reloaded.layout.allPlacements.map(\.id) == [idA, idB, added.id])
     }
 
@@ -330,7 +330,7 @@ struct DashboardLayoutStoreCustomizationTests {
         #expect(s.movePlacement(id: idB, to: GridPoint(column: 1, row: 0)) == true)
         #expect(s.layout.allPlacements.first { $0.id == idB }?.origin == GridPoint(column: 1, row: 0))
 
-        let reloaded = DashboardLayoutStore(seed: baseLayout(), defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: baseLayout(), defaults: defaults)
         #expect(reloaded.layout.allPlacements.first { $0.id == idB }?.origin == GridPoint(column: 1, row: 0))
     }
 
@@ -367,7 +367,7 @@ struct DashboardLayoutStoreCustomizationTests {
         #expect(s.movePlacement(id: idB, to: GridPoint(column: 2, row: 0)) == false)
 
         #expect(signature(s.layout) == afterValid)
-        let reloaded = DashboardLayoutStore(seed: baseLayout(), defaults: defaults)
+        let reloaded = DashboardCollectionStore(seed: baseLayout(), defaults: defaults)
         #expect(signature(reloaded.layout) == afterValid)
     }
 }
