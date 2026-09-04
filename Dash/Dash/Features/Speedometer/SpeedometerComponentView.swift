@@ -2,10 +2,17 @@
 //  SpeedometerComponentView.swift
 //  Dash — Speedometer feature
 //
-//  The dashboard-widget presentation. Compact / medium / large all show the same
-//  smoothed number from the same `SpeedometerViewModel` — only the type scale
-//  differs (`large` adds a caption and leaves room for a future gauge). No speed
-//  logic here.
+//  The dashboard-widget presentation. Two sizes only (large is intentionally
+//  unsupported — see `SpeedometerFeature.manifest`):
+//
+//    • .compact — the speed number is primary, with a restrained semi-circular
+//      bar above it (a dedicated compact composition — the full dial doesn't
+//      read at this footprint).
+//    • .medium  — the EXACT SAME `SpeedometerDial` as the full-screen view, at
+//      `SpeedometerGaugeStyle.standard`, just given a smaller frame. Nothing is
+//      cropped, simplified, or rearranged — it is the same instrument, scaled.
+//
+//  Both read the one shared `SpeedometerViewModel`; no speed logic here.
 //
 
 import SwiftUI
@@ -15,17 +22,15 @@ struct SpeedometerComponentView: View {
     let viewModel: SpeedometerViewModel
     let size: ComponentSize
 
-    private var style: SpeedometerReadoutStyle {
-        switch size {
-        case .compact:      return .compact
-        case .medium:       return .medium
-        case .large, .full: return .large
-        }
-    }
-
     var body: some View {
-        SpeedometerReadout(viewModel: viewModel, style: style)
-            .padding(size == .compact ? 8 : 12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        switch size {
+        case .compact:
+            SpeedometerCompactView(viewModel: viewModel)
+        case .medium, .large, .full:
+            // `.large` / `.full` should not reach a *component* view (large is
+            // unsupported; full goes through `makeFullScreenView`), but keep this
+            // total — the same standard gauge is a safe rendering at any size.
+            SpeedometerGaugeView(viewModel: viewModel, style: .standard)
+        }
     }
 }

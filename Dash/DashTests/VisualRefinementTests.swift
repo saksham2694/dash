@@ -128,26 +128,31 @@ struct FeatureIconIdentityTests {
     @Test("every not-yet-built feature advertises no dashboard widget size")
     func placeholdersHaveNoWidgets() {
         let registry = FeatureRegistry.makeDefault()
-        for id in ["apple-maps", "music", "weather", "settings"] {
+        for id in ["apple-maps", "music", "settings"] {
             #expect(registry.feature(id)?.manifest.supportedWidgetSizes.isEmpty == true)
         }
-        // …so the Add-Widget picker offers only the real widget features.
+        // …so the Add-Widget picker offers only the real widget features
+        // (Maps, Weather and Speedometer, in registry order — M8.4).
         let placeable = DashboardWidgetPickerView.placeableFeatures(registry.manifests).map(\.id)
-        #expect(placeable == ["maps", "speedometer"])
+        #expect(placeable == ["maps", "weather", "speedometer"])
     }
 
-    @Test("the Speedometer offers every widget size from one engine")
-    func speedometerHasWidgets() {
+    @Test("the Speedometer supports compact + medium widgets and full-screen, but NOT large")
+    func speedometerWidgetSizes() {
         let registry = FeatureRegistry.makeDefault()
         let manifest = registry.feature("speedometer")?.manifest
-        #expect(manifest?.supportedWidgetSizes == [.compact, .medium, .large])
+        #expect(manifest?.supportedWidgetSizes == [.compact, .medium])
         #expect(manifest?.supportedSizes.contains(.full) == true)
+        #expect(manifest?.supportedSizes.contains(.large) == false)
+        // …and the picker only offers the two supported widget footprints.
+        #expect(DashboardWidgetPickerView.offeredSizes(for: manifest!) == [.compact, .medium])
     }
 
-    @Test("Settings keeps a stable id for a future real SettingsFeature")
+    @Test("Settings kept its stable id when it became a real SettingsFeature (M8.3)")
     func settingsIdIsStable() {
-        #expect(PlaceholderFeature.ID.settings == "settings")
+        #expect(SettingsFeature.id == "settings")
         #expect(FeatureRegistry.makeDefault().feature("settings")?.manifest.title == "Settings")
+        #expect(FeatureRegistry.makeDefault().feature("settings") as? SettingsFeature != nil)
     }
 }
 

@@ -3,15 +3,16 @@
 //  Dash — Speedometer feature
 //
 //  The feature's app-scoped state: one `SpeedometerEngine` (the single source of
-//  truth) plus the display unit. Every Speedometer view — full-screen and each
-//  dashboard-widget size — reads this one instance, so the speed logic is never
-//  duplicated per size.
+//  truth for the displayed speed, its validity, its smoothing) plus the display
+//  unit. Every Speedometer view — full-screen and each dashboard-widget size —
+//  reads this one instance, so speed logic and smoothing are never duplicated per
+//  size and the UI does no interpolation of its own.
 //
-//  It is driven by the view: a `TimelineView` calls `tick(at:)` ~30×/s while a
+//  Driven by the view: a `TimelineView` calls `tick(at:)` ~30×/s while a
 //  Speedometer view is on screen. `tick` pulls the latest raw sample + link
 //  state from `SpeedometerTelemetry`, feeds the engine, and returns the current
-//  rounded reading. Between packets the engine's closed-form easing does the
-//  smoothing — no fake packets, no per-frame accumulator.
+//  `SpeedometerPresentation`. Between packets the engine's closed-form easing
+//  does the smoothing — no fake packets, no per-frame accumulator.
 //
 //  Not `ObservableObject`: the driving `TimelineView` re-renders every frame and
 //  the host's `LocationStore` (an `@EnvironmentObject` on the view) re-renders on
@@ -23,7 +24,9 @@ import Foundation
 @MainActor
 final class SpeedometerViewModel {
 
-    /// Display unit. A future Settings feature will set this; hard-defaulted now.
+    /// Display unit for the digital readout (M8.3). The live views call
+    /// `setUnit(_:)` from the shared `SpeedUnitStore` — this view model never
+    /// reads `UserDefaults` itself; the store is the one source of truth.
     private(set) var unit: SpeedometerUnit
 
     private var engine: SpeedometerEngine
@@ -41,10 +44,10 @@ final class SpeedometerViewModel {
     }
 
     /// Advance the engine to `now` from the latest telemetry and return the
-    /// reading to display. Safe to call at any cadence and from more than one
+    /// presentation to render. Safe to call at any cadence and from more than one
     /// mounted view.
     @discardableResult
-    func tick(at now: Date = Date()) -> SpeedometerReading {
+    func tick(at now: Date = Date()) -> SpeedometerPresentation {
         switch telemetry?.speedLinkState ?? .waiting {
         case .waiting:
             engine.markUnavailable()
@@ -59,15 +62,33 @@ final class SpeedometerViewModel {
                 )
             }
         }
-        return engine.reading(at: now, unit: unit)
+        return presentation(at: now)
     }
 
-    /// Current reading without advancing (for tests / previews).
-    func reading(at now: Date = Date()) -> SpeedometerReading {
-        engine.reading(at: now, unit: unit)
+    /// The gauge/number presentation at `now`. The needle/arc are always the
+    /// fixed M8.1 km/h scale; the digital readout honours `unit` (M8.3 — set
+    /// via `setUnit(_:)`, sourced from the shared `SpeedUnitStore`). Pure read,
+    /// does not advance the engine.
+    func presentation(at now: Date = Date()) -> SpeedometerPresentation {
+        let mps = engine.displaySpeed(at: now)
+        let kmh = SpeedometerUnit.kilometersPerHour.value(fromMetresPerSecond: mps)
+        return SpeedometerPresentation(
+            speedKmh: max(0, kmh),
+            unit: unit,
+            availability: engine.availability(at: now)
+        )
     }
 
-    /// Change the display unit (a Settings hook for later).
+    /// The engine reading in an explicit unit (for tests, or a caller that
+    /// wants a one-off conversion outside the presentation). Does not advance
+    /// the engine.
+    func reading(at now: Date = Date(), unit: SpeedometerUnit? = nil) -> SpeedometerReading {
+        engine.reading(at: now, unit: unit ?? self.unit)
+    }
+
+    /// Change the display unit — called by the live Speedometer views
+    /// (`SpeedometerGaugeView` / `SpeedometerCompactView`) from
+    /// `SpeedUnitStore`, the shared preference Settings edits (M8.3 §4).
     func setUnit(_ unit: SpeedometerUnit) {
         self.unit = unit
     }

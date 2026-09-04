@@ -99,14 +99,16 @@ struct FeatureRegistryTests {
         #expect(Set(names).count == names.count)   // no duplicate display names
     }
 
-    @Test("Google Maps and the Speedometer are real features; the rest are placeholders")
+    @Test("Google Maps, the Speedometer, Settings and Weather are real features; the rest are placeholders")
     func placeholdersResolve() {
         let registry = FeatureRegistry.makeDefault()
 
         #expect(registry.feature("maps") as? MapFeature != nil)
         #expect(registry.feature("speedometer") as? SpeedometerFeature != nil)
+        #expect(registry.feature("settings") as? SettingsFeature != nil)
+        #expect(registry.feature("weather") as? WeatherFeature != nil)
 
-        for id in ["apple-maps", "music", "weather", "settings"] {
+        for id in ["apple-maps", "music"] {
             let feature = registry.feature(id)
             #expect(feature as? PlaceholderFeature != nil, "\(id) should be a PlaceholderFeature")
             #expect(feature?.manifest.supportedSizes == [.full])

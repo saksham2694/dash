@@ -2,19 +2,19 @@
 //  PlaceholderFeature.swift
 //  Dash
 //
-//  Registered-but-not-yet-implemented features. Apple Maps, Apple Music, Weather
-//  and Settings are real Dash features — they belong in the sidebar and the Home
-//  launcher with their own identity now, not as dimmed "coming soon" stand-ins.
-//  Their runtime isn't built yet, so opening one full-screen shows a short
-//  "not set up yet" panel. They advertise no widget sizes, so the dashboard
-//  widget picker simply doesn't offer them until they ship. (Speedometer became
-//  a real feature in M8.0 — see `SpeedometerFeature`.)
+//  Registered-but-not-yet-implemented features. Apple Maps and Apple Music are
+//  real Dash features — they belong in the sidebar and the Home launcher with
+//  their own identity now, not as dimmed "coming soon" stand-ins. Their
+//  runtime isn't built yet, so opening one full-screen shows a short "not set
+//  up yet" panel. They advertise no widget sizes, so the dashboard widget
+//  picker simply doesn't offer them until they ship. (Speedometer became a
+//  real feature in M8.0 — see `SpeedometerFeature`; Settings became a real
+//  feature in M8.3 — see `SettingsFeature`; Weather became a real feature in
+//  M8.4 — see `WeatherFeature`.)
 //
-//  When a feature is implemented for real it gets its own file (e.g.
-//  `SettingsFeature`) and drops out of here — the **id** and manifest identity
-//  carry over unchanged, so persisted Home placements and navigation references
-//  keep resolving. `settings` in particular is a deliberately stable id for the
-//  future `SettingsFeature`.
+//  When a feature is implemented for real it gets its own file and drops out
+//  of here — the **id** and manifest identity carry over unchanged, so
+//  persisted Home placements and navigation references keep resolving.
 //
 
 import SwiftUI
@@ -64,8 +64,6 @@ extension PlaceholderFeature {
     enum ID {
         static let appleMaps = "apple-maps"
         static let music = "music"
-        static let weather = "weather"
-        static let settings = "settings"
     }
 
     static func appleMaps() -> PlaceholderFeature {
@@ -90,27 +88,6 @@ extension PlaceholderFeature {
         )
     }
 
-    static func weather() -> PlaceholderFeature {
-        PlaceholderFeature(
-            id: ID.weather,
-            title: "Weather",
-            symbolName: "cloud.sun.fill",
-            tint: .teal,
-            iconAssetName: "app-icon-weather",
-            blurb: "A glanceable weather widget is on the way."
-        )
-    }
-
-    static func settings() -> PlaceholderFeature {
-        PlaceholderFeature(
-            id: ID.settings,
-            title: "Settings",
-            symbolName: "gearshape.fill",
-            tint: .graphite,
-            iconAssetName: "app-icon-settings",
-            blurb: "Appearance, dashboard and connection preferences are on the way."
-        )
-    }
 }
 
 /// The full-screen panel for a not-yet-built feature — styled like the rest of

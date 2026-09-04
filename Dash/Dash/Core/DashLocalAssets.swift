@@ -16,6 +16,11 @@
 //  Files placed loose in `Dash/LocalAssets/` are bundled automatically by the
 //  file-system-synchronised project; this just resolves them by name.
 //
+//  Lives in `Core/` (M8.3) — a plain name→image lookup, not shell-specific —
+//  since `Core/DashWallpaperArtwork.swift` needs it too (a feature may not
+//  import `Shell/`, so the shared wallpaper-preview renderer sits alongside
+//  this rather than reaching into `Shell/`).
+//
 
 import SwiftUI
 

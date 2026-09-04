@@ -2,15 +2,21 @@
 //  DashAppIcon.swift
 //  Dash
 //
-//  The shell's app-icon system — a colourful rounded-square container with a
+//  Dash's app-icon system — a colourful rounded-square container with a
 //  centered SF Symbol glyph, plus a soft drop shadow and a hairline edge. Used
 //  by the Home launcher AND the sidebar's recent-apps rail so every surface
-//  renders a feature identically.
+//  renders a feature identically — and, since M8.4, by the Settings feature's
+//  Apps list, so Settings shows the SAME icons rather than a second mapping.
 //
 //  A feature's colour comes from its `FeatureManifest.iconStyle`: `.pinned` uses
 //  a chosen `FeatureTint`; `.automatic` derives a stable tint from the id, so a
 //  new feature is colourful and coherent with zero config. Feature-agnostic —
 //  it only reads the manifest.
+//
+//  Lives at `Features/` root (M8.4) — not `Shell/` — alongside `ComponentSize`
+//  and `SpeedometerUnit`, for the same reason: it's cross-cutting vocabulary
+//  the shell AND a feature (Settings) both legitimately need, and a feature
+//  may never import `Shell/` (CLAUDE.md).
 //
 
 import SwiftUI

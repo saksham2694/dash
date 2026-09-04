@@ -3091,3 +3091,487 @@ trip computer (distance / avg / max / reset-on-Bluetooth); a Settings unit
 toggle; any driving-feel tuning of τ.
 
 - Nothing committed.
+
+## M8.1 — Speedometer visual design (reference-driven)
+
+Status: Implemented against `DesignReferences/speedometer-design-reference.png`
+(the user-supplied reference — primary source of truth for composition/colour/
+typography, reproduced natively in SwiftUI, not as an image). Real-world driving
+validation still pending; verified with controlled/simulated speed values only.
+
+- Full-screen gauge: 0–200 km/h circular instrument, pure black ground, a
+  constant glowing red outer ring (chrome, not a value fill), an alternating
+  white/red major-tick rhythm with white numerals every 20 km/h, minor ticks
+  every 10, a tapered red needle that starts exactly at the pivot (no gap) with
+  a distinct dark hub (red ring) drawn on top, and the digital speed + "km/h"
+  anchored a fixed distance BELOW the hub (never overlapping the pivot). Needle
+  angle comes straight from `SpeedometerPresentation.speedKmh` (the engine's
+  already-smoothed value) via a 30 Hz `TimelineView` — no second smoothing.
+  Composition is centred (both axes) within the feature's own content frame,
+  not the physical screen.
+- Medium widget: the identical `SpeedometerDial` at the identical style, just a
+  smaller frame — same ticks, labels, needle, hub, number, proportionally
+  scaled. Nothing cropped or simplified.
+- Compact widget: a dedicated composition — a shallow semi-circular 0–200 km/h
+  bar (red fill to the current speed, radius solved to fit the actual widget
+  box) above the big digital number + "km/h". No needle, no full dial.
+- Large dashboard widget: NOT supported, by manifest
+  (`supportedSizes: [.compact, .medium, .full]`) — not merely by convention.
+- Self-contained: verified nothing under `Features/Speedometer/` references
+  `DashTheme`/`DashMetrics`/`DashboardShell`/the sidebar/the grid;
+  `SpeedometerFeature.swift` is the only file naming a shell-adjacent type.
+  `SpeedometerEngine` untouched.
+
+Tests / build: DashTests 605/605 pass, 0 failed, 0 skipped. Build clean (Debug).
+New `SpeedometerGaugeTests` (fraction/angle mapping, ticks, geometry helpers)
+carry over unchanged from the geometry pass; `SpeedometerViewModelTests` /
+`SpeedometerPresentationTests` updated for the presentation model. Verified via
+SwiftUI previews at 0/20/60/100/136/180/200 km/h and stale/unavailable states —
+no pixel-assertion tests, per instruction.
+
+Remaining: physical driving validation; possible tuning of tick/label density
+and glow intensity once seen on the actual iPad in daylight/night; a redline
+zone treatment was not added (not requested).
+
+- Nothing committed.
+
+## M8.2 — Dashboard widget feature assignment
+
+Status: Implemented. The dashboard already stored `WidgetPlacement.featureID`
+and rendered every widget generically through `DashFeature.makeComponentView(size:)`
+(no per-feature switch anywhere in the shell) — that architecture pre-dates this
+milestone and needed no rework. The actual gap was reassignment: a user could
+pick a feature when a widget was first added, but never change it afterward.
+That's what this milestone adds, plus feature-aware persistence guards.
+
+- **Reassignment**: `DashboardCollectionStore.updatePlacementFeature(id:to:registry:)`
+  changes an existing placement's `featureID` without touching its size or
+  origin. `registry` is a plain parameter (mirrors
+  `DashboardLayoutValidator`'s existing registry-aware overload) — the store
+  itself stores no registry reference and stays feature-agnostic. Refuses
+  (returns `false`, persists nothing) when the placement doesn't exist, the
+  target feature isn't registered, or its manifest doesn't support the
+  placement's *current* size — so an invalid feature/size combination can never
+  be written, without re-validating the rest of the layout (a blanket
+  registry-aware revalidation of every other placement was deliberately
+  avoided — it would let one stale widget elsewhere on the dashboard block an
+  unrelated edit). `DashboardLayoutEditor.settingFeature(of:to:in:)` is the pure
+  transform underneath, alongside the existing `settingSize` / `moving`.
+- **Picker UI**: new `DashboardFeaturePickerView` — a "Change Widget" sheet
+  opened from a new top-trailing swap control on each widget's edit-mode
+  chrome (alongside the existing remove / resize controls). Lists every
+  registered feature whose manifest supports the widget's *current* size
+  (`eligibleFeatures(_:for:)`, pure + tested) with its app icon, title, and a
+  selected-state checkmark — an incompatible feature is never even shown, so
+  size validation is enforced by omission, not a rejection message. Built from
+  `[FeatureManifest]` + `FeatureRegistry`, exactly like the existing Add-Widget
+  picker — no per-feature code.
+- **Live previews**: each row renders the feature's actual widget presentation
+  via `feature.makeComponentView(size:)` — the SAME generic seam
+  `WidgetHostView` uses to render the real widget, wrapped in a small
+  non-interactive thumbnail frame. No feature-specific rendering logic exists
+  in the picker: Speedometer's row shows its real compact bar / scaled full
+  dial, Google Maps' row shows its real live map widget, a placeholder's row
+  shows its real "not set up yet" panel — automatically, for any feature that
+  gets registered later.
+- **Size validation (existing, confirmed, unchanged)**: the resize Menu and
+  drag-resize handle already filtered to `placement.featureID`'s own
+  `supportedSizes`, so a currently-assigned feature could never be resized to
+  an incompatible size from the UI — no change needed there. `WidgetHostView`'s
+  render path already fell back to `UnresolvedWidgetView` for a size a
+  feature's manifest doesn't support, rather than silently rendering it.
+- **Migration**: none required. `WidgetPlacement.featureID` was already the
+  model's only identity — the dashboard was never hardcoded to Maps — so
+  existing persisted Map layouts (including the legacy single-dashboard
+  migration path) needed no schema change; `DashboardCollectionStoreMigrationTests`
+  already covered a migrated Map layout round-tripping unchanged and still
+  passes.
+- **Mini-app separation (confirmed, not modified)**: `DashboardShell` /
+  `DashboardSpaceView` / `WidgetHostView` still only ever see `any DashFeature`
+  — no feature-specific code was added to the shell to support this milestone;
+  the new picker takes the same `[FeatureManifest]` + `FeatureRegistry` seam
+  every other shell surface already uses.
+
+Files touched: `DashboardLayoutEditor.swift` (+`settingFeature`),
+`DashboardCollectionStore.swift` (+`updatePlacementFeature`),
+`DashboardSpaceView.swift` (change-feature control, sheet, alert case),
+new `DashboardFeaturePickerView.swift`, new
+`DashboardFeatureAssignmentTests.swift`. `SpeedometerEngine` and every other
+M8.1 Speedometer file are untouched.
+
+Tests / build: 17 new tests (`SettingFeatureEditorTests`,
+`UpdatePlacementFeatureTests`, `FeaturePickerEligibleFeaturesTests`) covering
+reassignment, persistence round-trip, refusal of invalid feature/size and
+unregistered-feature combinations, isolation between widgets and between
+dashboards, and the real registry's Speedometer (`.large` refused,
+`.compact`/`.medium` allowed) and Google Maps behaviour. Full suite run once:
+Dash 623/623, DashRelay 47/47, DashShared 16/16 — 0 failed, 0 skipped. Final
+Debug build clean.
+
+Remaining: physical testing on the iPad (drag/resize/reassign feel, live map +
+Speedometer previews rendering correctly inside the sheet) — deferred per
+instruction, not started.
+
+- Nothing committed.
+
+## M8.3 — Settings mini-app (Apple-style)
+
+Status: Implemented. The Settings placeholder is now a real, self-contained
+`SettingsFeature` — same stable id (`"settings"`) and title, full-screen only
+(`supportedSizes: [.full]`, confirmed never offered by either dashboard widget
+picker). Visually it deliberately does NOT use `DashTheme`/`DashMetrics`/
+`DashAppIcon` — plain `NavigationStack` + `.listStyle(.insetGrouped)`, native
+row/section/chevron/separator/background chrome, `.preferredColorScheme(nil)`
+at its root (clears `DashboardShell`'s forced `.dark` for this one subtree so
+Settings follows the system's actual appearance, not the automotive theme),
+`.tint(.blue)` instead of Dash's accent colour.
+
+- **Structure (§2)**: three sections, each with its own Apple-style header —
+  General (`NavigationLink` → an intentionally empty `ContentUnavailableView`,
+  no invented settings), Wallpaper (first fully functional section), Apps
+  (one row per registered feature, `FeatureManifest.symbolName` + a flat
+  Settings-only icon badge + a disclosure chevron).
+- **Apps list is registry-driven (§8)**: `SettingsRootView.apps(from:)` is a
+  pure filter over `FeatureRegistry.manifests` (`registry.manifests.filter {
+  $0.id != SettingsFeature.id }`) — no per-app list in `SettingsView`, no
+  feature-specific switch. Settings excludes itself (opening "Settings" from
+  inside its own Apps list would just reopen this same screen). A newly
+  registered feature appears automatically (tested).
+- **App detail pages (§3)**: `SettingsAppDetailView` renders the SAME generic
+  placeholder for every app except Speedometer, matched by a literal id
+  constant (`speedometerFeatureID = "speedometer"`, NOT a reference to the
+  `SpeedometerFeature` type — a feature never references another feature; a
+  test pins this literal against `SpeedometerFeature.id` so a future rename
+  can't silently drift them apart) — one explicit exception, not a per-app
+  switch.
+- **Speed Unit setting + architecture (§3/§4)**: new `Core/SpeedUnitStore`
+  (mirrors `WallpaperStore` exactly — `UserDefaults`-backed, defaults to
+  km/h). `SettingsSpeedometerView` shows a value row ("Speed Unit — km/h") →
+  `SettingsSpeedUnitPickerView`, a checkmark list of `SpeedometerUnit.allCases`.
+  Settings only ever calls `SpeedUnitStore.select(_:)` — it never touches
+  `SpeedometerEngine` or `SpeedometerViewModel`. The Speedometer feature's live
+  views (`SpeedometerGaugeView` / `SpeedometerCompactView`) read
+  `SpeedUnitStore` via `@EnvironmentObject` (the same pattern they already use
+  for `LocationStore`) and forward it into the existing M8.0
+  `SpeedometerViewModel.setUnit(_:)` hook on `.onAppear` and `.onChange` — a
+  live change while the Speedometer is on screen takes effect immediately.
+  `SpeedometerPresentation` gained a `unit` field: the needle/arc stay on the
+  fixed M8.1 0–200 km/h scale always (unchanged pixels — `SpeedometerGauge`
+  and the M8.1 visual design were NOT touched), only the digital
+  number/caption/accessibility text convert into the selected unit. No unit
+  persistence exists inside the Speedometer feature — `SpeedUnitStore` is the
+  only place it's read from or written to disk.
+- **Wallpaper (§5/§10)**: `SettingsWallpaperView` is a thin UI layer over the
+  EXISTING `WallpaperStore`/`WallpaperCatalog` — no second persistence system.
+  Each row previews the wallpaper's real artwork via a newly extracted
+  `Core/DashWallpaperArtwork` (pulled out of `Shell/DashShellBackground.swift`,
+  which now composes it with the shell's own legibility-gradient overlay) —
+  the same renderer the shell itself uses, not a second one. Only one
+  wallpaper ("Ember") exists today, so exactly one row is shown — no fake
+  choices invented. Selecting calls `WallpaperStore.select(_:)` directly, so
+  `DashShellBackground` updates immediately; already covered end-to-end by the
+  pre-existing `WallpaperTests.swift` (current-selection display, persistence,
+  corrupt-value fallback) since no new persistence logic was added.
+- **Relocations to make the above legal** (a feature may never import
+  `Shell/`, and Settings + Speedometer both now need types that used to live
+  one level too high): `WallpaperStore.swift`, `DashWallpaper.swift`, and
+  `DashLocalAssets.swift` moved `Shell/` → `Core/`; `SpeedometerUnit.swift`
+  moved `Features/Speedometer/` → `Features/` root (alongside `ComponentSize`,
+  for the identical reason — two features now share it). Pure relocations +
+  doc-comment updates, no logic changes; `DashShellBackground.swift` still
+  renders the shell background exactly as before, now by composing
+  `DashWallpaperArtwork` instead of an inlined private view.
+
+Files touched: `Core/SpeedUnitStore.swift` (new), `Core/DashWallpaperArtwork.swift`
+(new, extracted), `Core/{WallpaperStore,DashWallpaper,DashLocalAssets}.swift`
+(moved from `Shell/`), `Features/SpeedometerUnit.swift` (moved from
+`Features/Speedometer/`, gained `displayName`/`accessibilityName`),
+`Features/Settings/{SettingsFeature,SettingsRootView,SettingsRow,
+SettingsGeneralView,SettingsWallpaperView,SettingsAppDetailView,
+SettingsSpeedometerView}.swift` (new), `Features/PlaceholderFeature.swift`
+(settings placeholder retired), `Features/FeatureRegistry.swift`
+(`SettingsFeature()` in place of the placeholder), `Shell/DashShellBackground.swift`
+(background extraction only), `DashApp.swift` (+`SpeedUnitStore`),
+`Features/Speedometer/{SpeedometerPresentation,SpeedometerViewModel,
+SpeedometerGaugeView,SpeedometerCompactView,SpeedometerFeature}.swift`
+(unit-aware digital readout + `SpeedUnitStore` wiring — gauge geometry/needle
+math untouched), plus test updates
+(`FeatureRegistryTests`, `VisualRefinementTests`, `SpeedometerViewModelTests`)
+and a new `DashTests/SettingsFeatureTests.swift`. `SpeedometerEngine`,
+`SpeedometerGauge`, `ShellKeyboardStability`, the dashboard grid/persistence,
+and every M8.1/M8.2 file not listed above are untouched.
+
+Tests / build: 30 new/updated tests across `SettingsFeatureTests.swift`
+(`SettingsFeature` stable id + full-screen-only + never a widget choice,
+`SettingsRootView.apps(from:)` registry-driven filtering, icon-tint mapping,
+`SpeedUnitStore` default/persist/fallback) and `SpeedometerViewModelTests.swift`
+(unit-aware `SpeedometerPresentation`, `setUnit` changing the readout without
+touching the needle value, default-km/h). Full suite run once: Dash 646/646,
+DashRelay 47/47, DashShared 16/16 — 0 failed, 0 skipped. Final Debug build
+clean.
+
+A design note for physical review: the Settings navigation is a plain push
+`NavigationStack` (chevrons + push transitions), not a `NavigationSplitView`
+sidebar+detail — chosen for "keep it simple for this first version" (§7) and
+because it satisfies the explicit disclosure-chevron requirement (§6) most
+directly; a split-view layout remains an easy future upgrade if preferred on
+the iPad's larger screen.
+
+Remaining: physical testing on the iPad — Settings navigation, Apple-style
+appearance (light/dark, native chrome) on the real device, wallpaper
+switching + persistence, Speedometer unit switching and the gauge/compact
+widget actually reflecting km/h ↔ mph live — deferred per instruction, not
+started. General intentionally has no settings yet, by design.
+
+- Nothing committed.
+
+## M8.4 — Weather mini-app
+
+Status: Implemented as a real, self-contained `WeatherFeature` under
+`Features/Weather/` — same stable id (`"weather"`) as the retired placeholder.
+Compact + medium dashboard widgets and a full-screen presentation; `.large`
+intentionally unsupported (mirrors Speedometer). Real data only — no
+mock/fake weather is reachable from production code.
+
+- **Provider**: Apple WeatherKit (`WeatherKitService`), behind a
+  `WeatherService` protocol (mirrors `MapProvider`'s decoupling — nothing
+  outside `WeatherKitService.swift` knows the provider is WeatherKit). One
+  call fetches `.current, .hourly, .daily`; a parallel best-effort
+  `CLGeocoder` reverse-geocode adds the locality name (`nil` on failure,
+  never blocks the weather fetch). WeatherKit's ~30-case `WeatherCondition` is
+  mapped into this feature's own small vocabulary (clear / partlyCloudy /
+  cloudy / rain / thunderstorm / snow / fog / other) so nothing else in the
+  feature — appearance, views, tests — knows about the provider's case list.
+- **Location**: a new `WeatherLocationSource` protocol (mirrors
+  `SpeedometerTelemetry` exactly) is the one seam to Dash;
+  `WeatherLocationSourceLocationStore.swift` is the one file that couples it
+  to the existing `LocationStore` — no second `CLLocationManager` was
+  introduced.
+- **Refresh/caching (§2/§8 — "do not hammer the API")**: `WeatherRefreshPolicy`
+  is pure, testable logic. `WeatherViewModel.locationDidChange(at:)` is cheap
+  to call on every GPS packet (~1 Hz, via `.onChange(of: locationStore.latestPacket)`
+  in each live view) — the policy decides whether that reaches the network:
+  normally once every 15 minutes, or sooner (after a 60s floor, to absorb GPS
+  jitter) once the car has moved ≥5 km from where the last fetch was made. A
+  snapshot older than 30 minutes, or one whose most recent background refresh
+  failed, is presented `stale` (dimmed, "last updated…") rather than silently
+  shown as current. `WeatherViewModel` is `ObservableObject` (unlike
+  `SpeedometerViewModel`) since Weather has no per-frame driver — views just
+  re-render when a fetch resolves.
+- **States handled (§2)**: `.unavailable` (no GPS fix yet), `.loading` (first
+  fetch in flight), `.failed` (fetch failed, no data to fall back to), and
+  `.loaded(snapshot, stale:)` — each with clean, non-alarming UI
+  (`WeatherStatusContent` for the first three).
+- **Compact widget**: locality (or "My Location"), a large current
+  temperature, condition text + icon, H:/L:, weather-dependent background. No
+  hourly strip — the compact footprint is too tight without cramming, and
+  current conditions are the stated priority at that size.
+- **Medium widget**: the same header (locality, big temp, condition, icon,
+  H:/L:), a hairline separator, then a 6-column hourly strip (time — "Now" for
+  the first entry within a minute — icon, temperature).
+- **Full-screen**: the SAME `WeatherDetailDial` content as medium
+  (`isFullScreen: true` only scales type/spacing/icon size, never rearranges
+  the layout) at the feature's full frame — no weather maps, precipitation
+  charts, wind/UV/air-quality cards, 10-day forecast, or extra navigation, per
+  instruction.
+- **Appearance layer**: `WeatherAppearanceResolver.appearance(for:isDaylight:)`
+  is pure — condition + day/night in, a two-stop gradient + a
+  light/dark-content contrast decision out. Covers clear/day, clear/night,
+  partly cloudy, cloudy, rain, thunderstorm, snow, and a fog/other fallback;
+  night applies a scrim to every palette that doesn't already have its own
+  dedicated night colours (clear, thunderstorm). Snow/fog use dark
+  foreground content for contrast on their pale backgrounds; everything else
+  uses white. No automotive red — Weather owns its own palette entirely, and
+  a neutral dark field covers the three non-loaded states.
+- **Units (§6)**: no new Settings page or preference. `WeatherFormatting.temperatureText`
+  uses Foundation's `Measurement.FormatStyle` with `usage: .weather`, which
+  reads the SAME per-category system preference Apple's own Weather app
+  honours (e.g. Fahrenheit in the US even in a broadly-metric configuration).
+- **SF Symbols only**: every icon is the provider's own `symbolName` rendered
+  via `Image(systemName:)` — no proprietary Apple artwork.
+
+**Manual setup required before real data will flow** (could not be completed
+from this environment — no Apple Developer Portal or Xcode GUI access):
+1. In Xcode, select the `Dash` target → Signing & Capabilities → **+ Capability
+   → WeatherKit**. With the paid developer account (team `LGQX79QMNJ`) already
+   signed in, this registers the WeatherKit capability for the App ID
+   (`com.sakshamsharma.Dash`) on the Apple Developer portal and generates/updates
+   the entitlements file automatically — this is the supported way to do it;
+   hand-editing `project.pbxproj` was deliberately avoided.
+2. Xcode should auto-regenerate the provisioning profile; if it doesn't,
+   regenerate it manually in the portal / via Xcode's "Try Again" on the
+   signing error.
+3. Rebuild and run on-device (or in Simulator signed with that profile).
+   Until step 1 is done, every `WeatherKitService.fetchWeather` call throws —
+   the app already handles that cleanly as the `.failed` presentation; it
+   never substitutes fake data.
+
+Files added: `Features/Weather/{WeatherFeature,WeatherService,WeatherKitService,
+WeatherSnapshot,WeatherSnapshot+Preview,WeatherCondition,WeatherCoordinate,
+WeatherLocationSource,WeatherLocationSourceLocationStore,WeatherRefreshPolicy,
+WeatherAppearance,WeatherPresentation,WeatherViewModel,WeatherFormatting,
+WeatherStatusContent,WeatherCompactView,WeatherDetailView,WeatherView,
+WeatherComponentView}.swift`, `DashTests/WeatherFeatureTests.swift`. Changed:
+`Features/PlaceholderFeature.swift` (weather placeholder retired),
+`Features/FeatureRegistry.swift` (`WeatherFeature()` in place of the
+placeholder), `DashTests/{FeatureRegistryTests,VisualRefinementTests}.swift`
+(placeholder-list assertions updated for Weather's real widget sizes).
+`DashboardShell` and every other Shell file are untouched — Weather needed no
+shell-level changes, the same generic `DashFeature`/`FeatureRegistry` seam
+every other feature uses. `SpeedometerEngine`, the M8.1 gauge design, and all
+M8.2/M8.3 Settings/dashboard-assignment work are untouched.
+
+Tests / build: 33 new tests in `WeatherFeatureTests.swift` (feature id/sizes/
+registration, appearance resolution incl. day/night + contrast, the
+WeatherKit condition mapping, `WeatherCoordinate` distance, the refresh
+policy's throttling/movement/clock-safety rules, `WeatherViewModel`'s
+unavailable/loading/failed/loaded(+stale) transitions against a fake
+service, and locale-aware temperature/hour formatting), plus 3 existing
+tests updated for Weather's new real widget sizes. Full suite run once: Dash
+677/677, DashRelay 47/47, DashShared 16/16 — 0 failed, 0 skipped. Final Debug
+build clean.
+
+Remaining: the manual WeatherKit capability/entitlement setup above, then
+physical testing on the iPad — real WeatherKit data, compact/medium widget
+legibility while driving, day/night appearance transitions, and the
+refresh/caching behaviour over an actual drive — deferred per instruction,
+not started.
+
+- Nothing committed.
+
+## WeatherKit setup — completed
+
+The manual Xcode step called out in the M8.4 entry above is done: the user
+added the WeatherKit capability via Signing & Capabilities themselves.
+`Dash/Dash/Dash.entitlements` now exists and contains
+`com.apple.developer.weatherkit = true` (confirmed by inspection). Per the
+user, real weather data is now flowing. Not independently re-verified from
+this environment (no device/network-connected simulator path available
+here) — still worth a physical-device glance, but no longer blocked.
+
+## Weather — post-M8.4 UI/data polish (current state)
+
+Several small follow-up passes, each explicitly scoped as "small fix only, no
+tests/build" (or build-only-if-needed) — net current state:
+
+- **Temperature formatting**: every displayed temperature is a whole number.
+  Fixed properly via `.precision(.fractionLength(0))` on the
+  `Measurement.FormatStyle` — the earlier `.rounded()`-only version set the
+  rounding *rule* but not the displayed precision, so a non-round underlying
+  value (e.g. 24.3°) could still render with a decimal.
+- **Compact widget**: reworked to match `DesignReferences/weather-compat-widget.jpeg` —
+  locality + big temp on the left, icon + condition text + H:/L: stacked on
+  the right (was previously stacked under the temperature — wrong column).
+  Added a small hourly strip (5 nearby hours) below; WeatherKit's hourly
+  forecast only looks forward from "now", so there's no past hour without a
+  second, separate historical-weather call — not added.
+- **Medium / full-screen**: same header-column fix, plus a new upcoming-days
+  section (day, icon, low → high) below the hourly strip — 3 days on the
+  widget, 5 full-screen. The low/high range indicator is a plain capped-width
+  capsule, not a reproduction of Apple's precise temperature-gradient bar.
+  Full-screen still just renders the same `WeatherDetailDial` larger — no
+  separate full-screen layout exists.
+- **Daily-forecast row spacing** (iterated a few times against feedback,
+  landing here): the low/high temperature labels use `.lineLimit(1)` +
+  `.fixedSize()` so `"24°C"` can never wrap onto two lines regardless of
+  layout pressure; the horizontal gaps around the icon, low temp, range bar,
+  and high temp are flexible `Spacer`s (not fixed padding) so the row uses
+  more of the widget's actual width instead of clustering on the left with
+  empty space on the right; the range bar itself stays width-capped so it
+  can't become the dominant element. Vertically, the gap between the hourly
+  strip and the daily section is a flexible `Spacer` (not a fixed height), so
+  the daily section settles toward the lower portion of the widget instead of
+  sitting flush under the hourly strip with dead space below it.
+- Architecture from the original M8.4 entry is unchanged throughout this
+  polish pass: same `WeatherFeature` / `WeatherService` / `WeatherKitService` /
+  `WeatherLocationSource` / `WeatherRefreshPolicy` / `FeatureRegistry`
+  integration; compact + medium + full-screen only, large still unsupported;
+  no Weather settings; no second `CLLocationManager`.
+- Tests/build: a couple of these passes ran a Debug build to confirm
+  compilation (no test suite); most ran neither, per instruction. Nothing
+  here is known to be broken, but none of this polish pass has been run
+  through the full suite or a physical device yet.
+
+## Settings — Apps icon reuse fix
+
+The Settings ▸ Apps list was rendering its own separate flat icon/tint
+mapping instead of the same icons Home/the sidebar use. Fixed by tracing to
+the actual source of truth and reusing it:
+
+- `DashAppIcon.swift` moved `Shell/` → `Features/` root (pure relocation, same
+  reasoning as `ComponentSize`/`SpeedometerUnit`: a feature may not import
+  `Shell/`, and Settings now legitimately needs this type too).
+- `SettingsRow` rewritten to build a real `DashAppIcon(manifest:)` /
+  `DashAppIcon(symbolName:tint:)` directly, at Settings' own row size (29pt) —
+  removed the duplicate mapping it had grown in M8.3
+  (`FeatureTint.settingsIconColor`, `FeatureManifest.settingsIconTint`, and
+  the standalone `SettingsIconBadge`).
+- The Apps list stays registry-driven (`FeatureRegistry.manifests`, Settings
+  excluded) — only the icon *rendering* changed, not what's listed.
+- Test: the old icon-tint test suite was replaced with a smaller check that
+  `DashAppIcon.tint(for:id:)` still resolves for every real registered
+  manifest (a regression guard, not new coverage of new logic).
+
+## Wallpaper library — built-in + custom (current state)
+
+Extends the existing M8.3 `WallpaperStore` / `WallpaperCatalog` /
+`DashWallpaperArtwork` architecture — no second wallpaper system.
+
+- **`WallpaperID`** generalized from a closed one-case `enum` to an open
+  string wrapper (`RawRepresentable` struct), since custom wallpapers need
+  arbitrary generated ids, not a fixed compile-time set. Load-time validation
+  (falling back to the default on an unrecognised persisted id) now checks
+  the persisted value against the known built-in AND custom sets explicitly,
+  since the type itself no longer rejects unknown strings.
+- **`DashWallpaper`** gained `customFileURL: URL?` and `isDeletable: Bool`,
+  and a third init for a plain-file-backed wallpaper (used by both custom and
+  non-default built-in entries) alongside the original asset-name-backed
+  init (still exactly how the shipped default, "Ember", resolves).
+- **`WallpaperStore`** now also owns custom wallpapers: `addCustomWallpaper(imageData:displayName:)`
+  (downscales to a 2048px max dimension, re-encodes as JPEG, copies into the
+  app's own sandbox at `Application Support/CustomWallpapers/`, persists a
+  small JSON metadata record separately from the selection key) and
+  `deleteCustomWallpaper(id:)` (removes the file + record; if it was
+  selected, falls back to the default built-in — never leaves the shell
+  wallpaper-less). `allWallpapers` combines built-ins + custom for the UI.
+- **`SettingsWallpaperView`** rewritten: one unified list (built-ins then
+  custom, in that order) with a native `PhotosPicker` "Add Wallpaper" row (no
+  photo-library permission prompt needed — that's how `PhotosPicker` works)
+  and swipe-to-delete on custom rows only; a plain alert surfaces an import
+  failure rather than failing silently.
+- **Built-in resource location**: `Dash/Dash/BuiltInWallpapers/` — committed
+  (unlike git-ignored `Dash/Dash/LocalAssets/`, which stays reserved for
+  private/non-redistributable dev assets). An automatic folder-scanning
+  mechanism was built, then explicitly reverted per instruction in favour of
+  hand-declared entries — adding a built-in is now: drop the file in that
+  folder, add one `builtInWallpaper(fileName:extension:id:displayName:)` line
+  in `WallpaperCatalog.all`. Currently declared: **Ember** (existing) +
+  **Blue Dark**, **Blue Light**, **Red Dark** (the three files the user
+  placed in that folder). Resolved via `Bundle.main.url(forResource:withExtension:)`
+  with no `subdirectory:` — this project's file-system-synchronized group
+  flattens loose resource files to the bundle root rather than preserving
+  the folder as an actual bundle subdirectory (confirmed by inspecting the
+  built `.app`).
+- **Known pending item, not yet resolved**: the same three wallpaper images
+  also exist as three separate, already-committed Asset Catalog imagesets
+  under `Assets.xcassets/Wallpapers/` (`blue dark wallpaper`, `blue light
+  wallpaper`, `red dark wallpaper`) — added via Xcode's own UI at some point,
+  entirely unreferenced by any code. Left in place pending the user's choice
+  to keep or remove; flagged directly to the user when found (an earlier
+  `rm -rf` on that folder briefly deleted these before they were restored
+  from git's index — no data was actually lost, but it's noted here since the
+  duplication itself is still unresolved).
+- Tests: `WallpaperTests.swift` gained 5 tests (add/delete a custom
+  wallpaper, deleting the selected custom wallpaper falls back to the
+  default, a built-in can never be deleted, a custom wallpaper persists
+  across store instances) plus a fix to the pre-existing corrupt-value-falls-
+  back test for the new open-string `WallpaperID`. All passing at time of
+  writing. Build clean throughout these passes.
+
+Remaining for both Weather-polish and the wallpaper library: none of this has
+been run through the full Dash/DashRelay/DashShared suite (only targeted
+subsets were run, per instruction) or exercised on a physical device —
+physical testing (including real custom-wallpaper import via Photos, and the
+Weather UI's on-device look) is still pending.
+
+- Nothing committed.

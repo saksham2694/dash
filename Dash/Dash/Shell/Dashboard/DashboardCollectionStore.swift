@@ -16,6 +16,12 @@
 //  active dashboard. The pure work still goes through `DashboardLayoutEditor` and
 //  `DashboardLayoutValidator` — nothing is reimplemented.
 //
+//  M8.2 adds `updatePlacementFeature` — reassigning which feature fills an
+//  ALREADY-PLACED widget (as opposed to `addWidget`, which picks a feature for a
+//  brand new one). It takes a `FeatureRegistry` as a plain parameter so the size
+//  compatibility check can be feature-aware without this store storing a
+//  registry reference or hardcoding any feature.
+//
 //  Mirrors the project's other small stores: storage only, no networking, no
 //  feature knowledge, no runtime feature state. Features remain unaware that a
 //  dashboard collection exists — they only ever see `WidgetPlacement` /
@@ -155,6 +161,24 @@ final class DashboardCollectionStore: ObservableObject {
     func updatePlacementSize(id: UUID, to size: ComponentSize) -> Bool {
         guard placementExists(id) else { return false }
         return applyIfValid(DashboardLayoutEditor.settingSize(of: id, to: size, in: layout))
+    }
+
+    /// Reassign which feature fills an existing widget (M8.2). Refused when the
+    /// placement doesn't exist, `featureID` isn't registered, or its manifest
+    /// doesn't support the placement's *current* size — the size itself is
+    /// never changed here, so this can never persist an invalid feature/size
+    /// combination. `registry` is a plain parameter, not stored: this store
+    /// stays feature-agnostic the same way `DashboardLayoutValidator`'s
+    /// registry-aware overload does, and the caller (`DashboardSpaceView`)
+    /// already holds the registry it was injected.
+    @discardableResult
+    func updatePlacementFeature(id: UUID, to featureID: FeatureID, registry: FeatureRegistry) -> Bool {
+        guard let placement = layout.allPlacements.first(where: { $0.id == id }) else { return false }
+        guard
+            let feature = registry.feature(featureID),
+            feature.manifest.supportedSizes.contains(placement.size)
+        else { return false }
+        return applyIfValid(DashboardLayoutEditor.settingFeature(of: id, to: featureID, in: layout))
     }
 
     @discardableResult

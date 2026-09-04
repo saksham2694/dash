@@ -36,8 +36,13 @@ struct DashApp: App {
     @StateObject private var homeLayout: HomeLayoutStore
 
     /// Persisted shell wallpaper selection. Read by `DashShellBackground` on both
-    /// the Dashboard and Home; a future Settings feature changes it.
+    /// the Dashboard and Home; the Settings ▸ Wallpaper screen (M8.3) changes it.
     @StateObject private var wallpaper = WallpaperStore()
+
+    /// Persisted Speedometer display-unit preference (M8.3). Read by the
+    /// Speedometer feature's live views; the Settings ▸ Speedometer screen
+    /// changes it. See `Core/SpeedUnitStore`.
+    @StateObject private var speedUnit = SpeedUnitStore()
 
     init() {
         // Hand the Google Maps + Places SDKs their API key before any map view
@@ -76,6 +81,7 @@ struct DashApp: App {
                 .environmentObject(dashboards)
                 .environmentObject(homeLayout)
                 .environmentObject(wallpaper)
+                .environmentObject(speedUnit)
                 .task { connection.startSession() }
                 // Dash is a fixed full-screen automotive surface. The software
                 // keyboard (Maps search) must overlay content, never resize or

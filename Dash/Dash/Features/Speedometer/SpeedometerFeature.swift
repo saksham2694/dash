@@ -11,7 +11,13 @@
 //  that names a `Shell/` type (`DashFeature` / `FeatureManifest`, which live under
 //  `Features/`, not `Shell/`). The engine, view model, units and views know
 //  nothing about `DashboardShell`, the sidebar, the dashboard grid, or
-//  navigation. Location arrives only via `SpeedometerTelemetry`.
+//  navigation. Location arrives only via `SpeedometerTelemetry`; the display
+//  unit (M8.3) arrives the same way architecturally — the live views read the
+//  shared `Core/SpeedUnitStore` via `@EnvironmentObject` (exactly like they
+//  already do for `LocationStore`) and forward it into
+//  `SpeedometerViewModel.setUnit(_:)`. Settings edits `SpeedUnitStore`; this
+//  feature never references Settings, and `SpeedometerEngine` never gains unit
+//  awareness — the readout is a display-only conversion of its m/s output.
 //
 
 import SwiftUI
@@ -22,11 +28,14 @@ final class SpeedometerFeature: DashFeature {
     /// Stable id — matches the retired placeholder so nothing has to migrate.
     static let id: FeatureID = "speedometer"
 
+    /// `.large` is **intentionally not supported** — the circular cluster does not
+    /// read at that footprint. The dashboard widget picker and validator honour
+    /// `supportedSizes`, so a large Speedometer widget can't be created.
     let manifest = FeatureManifest(
         id: SpeedometerFeature.id,
         title: "Speedometer",
         symbolName: "speedometer",
-        supportedSizes: [.compact, .medium, .large, .full],
+        supportedSizes: [.compact, .medium, .full],
         defaultSize: .medium,
         iconStyle: .pinned(.orange),
         iconAssetName: "app-icon-speedometer"

@@ -56,6 +56,11 @@ struct DashboardSpaceView: View {
     @State private var showingDashboardManager = false
     @State private var editAlert: EditAlert?
 
+    /// The widget currently being reassigned to a different feature (M8.2), or
+    /// `nil` when that sheet is closed. `WidgetPlacement` is `Identifiable`, so
+    /// this doubles as the `.sheet(item:)` driver.
+    @State private var featurePickerTarget: WidgetPlacement?
+
     /// The in-flight drag / resize, if any. Transient — never persisted; the
     /// store is written once, on `end`.
     @State private var interaction: Interaction?
@@ -94,6 +99,16 @@ struct DashboardSpaceView: View {
         .sheet(isPresented: $showingDashboardManager) {
             DashboardManagerView(dashboards: dashboards)
         }
+        .sheet(item: $featurePickerTarget) { placement in
+            DashboardFeaturePickerView(
+                manifests: registry.manifests,
+                registry: registry,
+                size: placement.size,
+                currentFeatureID: placement.featureID
+            ) { featureID in
+                changeFeature(placement.id, to: featureID)
+            }
+        }
         .alert(
             editAlert?.title ?? "",
             isPresented: Binding(
@@ -126,6 +141,16 @@ struct DashboardSpaceView: View {
     private func resizeWidget(_ id: UUID, to size: ComponentSize) {
         if !dashboards.updatePlacementSize(id: id, to: size) {
             editAlert = .sizeDoesNotFit
+        }
+    }
+
+    /// Reassign a widget's feature (M8.2). `DashboardFeaturePickerView` already
+    /// only offers features that support the widget's current size, so this
+    /// should always succeed from the UI; the alert is defence in depth, not a
+    /// path normally reachable.
+    private func changeFeature(_ id: UUID, to featureID: FeatureID) {
+        if !dashboards.updatePlacementFeature(id: id, to: featureID, registry: registry) {
+            editAlert = .featureUnavailable
         }
     }
 
@@ -311,6 +336,7 @@ struct DashboardSpaceView: View {
     enum EditAlert: Identifiable {
         case noRoomToAdd
         case sizeDoesNotFit
+        case featureUnavailable
 
         var id: Int { hashValue }
 
@@ -318,6 +344,7 @@ struct DashboardSpaceView: View {
             switch self {
             case .noRoomToAdd:   return "No room on the dashboard"
             case .sizeDoesNotFit: return "That size doesn’t fit here"
+            case .featureUnavailable: return "That feature isn’t available here"
             }
         }
 
@@ -327,6 +354,8 @@ struct DashboardSpaceView: View {
                 return "Remove a widget or add a smaller one to make space."
             case .sizeDoesNotFit:
                 return "There isn’t room for that size at this widget’s position. Remove or shrink a nearby widget first."
+            case .featureUnavailable:
+                return "That feature doesn’t support this widget’s current size."
             }
         }
     }
@@ -396,6 +425,7 @@ struct DashboardSpaceView: View {
             isInteracting: interaction?.placementID == placement.id,
             onRemove: { removeWidget(placement.id) },
             onResize: { resizeWidget(placement.id, to: $0) },
+            onChangeFeature: editing ? { featurePickerTarget = placement } : nil,
             onMoveGesture: editing
                 ? { translation, ended in handleMove(placement, translation: translation, ended: ended, geometry: geometry) }
                 : nil,
@@ -482,6 +512,10 @@ struct WidgetHostView: View {
     /// (→ `DashboardLayoutStore.updatePlacementSize`).
     var onResize: ((ComponentSize) -> Void)? = nil
 
+    /// Edit-mode: reassign which feature fills this widget (M8.2 — opens
+    /// `DashboardFeaturePickerView`, → `DashboardCollectionStore.updatePlacementFeature`).
+    var onChangeFeature: (() -> Void)? = nil
+
     /// Edit-mode: the body was dragged — `(translation, ended)`. The parent snaps
     /// it to the grid and commits on `ended`.
     var onMoveGesture: ((CGSize, Bool) -> Void)? = nil
@@ -536,6 +570,7 @@ struct WidgetHostView: View {
             )
             .opacity(isInteracting ? 0.75 : 0.92)
             .overlay(alignment: .topLeading) { removeControl }
+            .overlay(alignment: .topTrailing) { changeFeatureControl }
             .overlay(alignment: .bottomLeading) { sizeControl }
             .overlay(alignment: .bottomTrailing) { resizeHandle }
             .gesture(
@@ -564,6 +599,24 @@ struct WidgetHostView: View {
         .buttonStyle(.plain)
         .padding(DashMetrics.overlayControlInset)
         .accessibilityLabel("Remove \(featureTitle) widget")
+    }
+
+    @ViewBuilder
+    private var changeFeatureControl: some View {
+        if onChangeFeature != nil {
+            Button {
+                onChangeFeature?()
+            } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.dashTextPrimary)
+                    .padding(DashMetrics.spacingSmall)
+                    .background(Circle().fill(Color.dashControlScrim))
+            }
+            .buttonStyle(.plain)
+            .padding(DashMetrics.overlayControlInset)
+            .accessibilityLabel("Change \(featureTitle) widget's feature")
+        }
     }
 
     @ViewBuilder

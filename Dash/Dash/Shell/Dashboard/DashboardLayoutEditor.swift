@@ -50,6 +50,19 @@ nonisolated enum DashboardLayoutEditor {
         mapPlacement(layout, placementID) { $0.origin = origin }
     }
 
+    /// Set the `featureID` of the placement with `placementID` (M8.2 — reassign
+    /// which feature fills an existing widget). Size and origin are unchanged —
+    /// the caller (`DashboardCollectionStore.updatePlacementFeature`) checks the
+    /// new feature actually supports the placement's current size before this
+    /// runs, so this transform never needs the registry itself.
+    static func settingFeature(
+        of placementID: UUID,
+        to featureID: FeatureID,
+        in layout: DashboardLayout
+    ) -> DashboardLayout {
+        mapPlacement(layout, placementID) { $0.featureID = featureID }
+    }
+
     /// Append `placement` to the page at `pageIndex`. Out-of-range → unchanged.
     static func adding(
         _ placement: WidgetPlacement,
