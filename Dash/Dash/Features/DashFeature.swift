@@ -26,6 +26,21 @@ import SwiftUI
 /// surface, so a rename would orphan saved state.
 typealias FeatureID = String
 
+/// One of a small, curated set of automotive icon tints. SDK-neutral (a token,
+/// not a `Color`) so `FeatureManifest` stays SwiftUI-free — the shell's
+/// `DashAppIcon` maps each case to an actual gradient.
+nonisolated enum FeatureTint: String, Sendable, Equatable, CaseIterable, Codable {
+    case blue, teal, green, indigo, purple, pink, orange, red, graphite
+}
+
+/// A feature's app-icon visual identity. `automatic` lets the shell derive a
+/// stable tint from the feature id (so every feature is colourful without extra
+/// work); a feature can `pinned` a specific tint when it has a strong identity.
+nonisolated enum FeatureIconStyle: Sendable, Equatable {
+    case automatic
+    case pinned(FeatureTint)
+}
+
 /// How a feature wants to identify and present itself. SDK-neutral value type.
 nonisolated struct FeatureManifest: Sendable, Equatable, Identifiable {
 
@@ -46,12 +61,24 @@ nonisolated struct FeatureManifest: Sendable, Equatable, Identifiable {
     /// `supportedSizes`.
     let defaultSize: ComponentSize
 
+    /// The app-icon visual identity (colour treatment). Defaults to `.automatic`.
+    let iconStyle: FeatureIconStyle
+
+    /// The `LocalAssets/` (or bundle) image name for this feature's real app
+    /// icon, if the developer has supplied one (private dev build). `nil` → the
+    /// shell derives `"app-icon-<id>"`. Either way the shell falls back to the
+    /// procedural glyph when no image is present, so the committed build never
+    /// needs the asset.
+    let iconAssetName: String?
+
     init(
         id: FeatureID,
         title: String,
         symbolName: String,
         supportedSizes: Set<ComponentSize>,
-        defaultSize: ComponentSize
+        defaultSize: ComponentSize,
+        iconStyle: FeatureIconStyle = .automatic,
+        iconAssetName: String? = nil
     ) {
         precondition(
             supportedSizes.contains(defaultSize),
@@ -62,6 +89,8 @@ nonisolated struct FeatureManifest: Sendable, Equatable, Identifiable {
         self.symbolName = symbolName
         self.supportedSizes = supportedSizes
         self.defaultSize = defaultSize
+        self.iconStyle = iconStyle
+        self.iconAssetName = iconAssetName
     }
 
     /// The widget sizes this feature supports (i.e. excluding `.full`).

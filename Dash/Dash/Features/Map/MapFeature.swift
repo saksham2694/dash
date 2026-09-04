@@ -35,10 +35,12 @@ final class MapFeature: DashFeature {
 
     let manifest = FeatureManifest(
         id: MapFeature.id,
-        title: "Maps",
+        title: "Google Maps",
         symbolName: "map.fill",
         supportedSizes: [.compact, .medium, .large, .full],
-        defaultSize: .large
+        defaultSize: .large,
+        iconStyle: .pinned(.green),
+        iconAssetName: "app-icon-google-maps"
     )
 
     // MARK: - App-scoped Map runtime state

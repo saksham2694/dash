@@ -2,21 +2,35 @@
 //  DashboardShell.swift
 //  Dash
 //
-//  The CarPlay-style shell: a persistent left sidebar + a content area that
-//  shows the active `ShellSurface`. This is the single layout/navigation owner
-//  (spec §8) — feature views know nothing about it.
+//  The CarPlay-style shell: a fixed left rail (`DashSidebar`) + a content area
+//  that shows the active `ShellSurface`, composited as ONE rounded, inset
+//  container. The wallpaper (`DashShellBackground`) is the *background of that
+//  container* — it is clipped to the shell's rounded corners and shares the
+//  shell's inset, so it never appears outside the shell or behind the status-bar
+//  area. Shell inset + corner radius come from `DashMetrics.shell*` (one source
+//  of truth) so the wallpaper and the shell geometry cannot drift apart.
+//
+//  This is the single layout/navigation owner (spec §8) — feature views know
+//  nothing about it. The iPadOS status bar / home indicator are hidden
+//  (automotive full screen); the rail's own clock is the time display.
+//
+//  Keyboard: the whole SwiftUI tree opts out of keyboard safe-area avoidance
+//  (`DashApp` applies `.ignoresSafeArea(.keyboard)` at the hosting-view root —
+//  the ancestor that absorbs the keyboard inset). The shell re-asserts it here
+//  directly on its fill frame as a belt-and-suspenders anchor: when the Maps
+//  search field is focused the keyboard overlays the lower shell area but the
+//  rail top, the wallpaper, the rounded bounds and the border do not move,
+//  resize, or clip. Dismissing the keyboard is a no-op — nothing was displaced.
 //
 //  Shown by `RootView` whenever Dash is connected, in place of the old
 //  full-screen map view.
 //
-//  Scope so far: the shell/feature seam, the single widget dashboard, real Map
-//  dashboard components (M5.2.x), and the App-Home launcher (M5.3.x). The
-//  Dashboard and the Home pages form one horizontal sequence of spaces driven
-//  by `SpacePagerView`; a full-screen `.app` is shown instead of that pager.
-//  Both spaces forward a tapped tile's `featureID` through an `onOpenFeature`
-//  callback → `ShellStore.openApp`; `closeApp()` returns to the exact Home page
-//  / the Dashboard it was opened from. Feature runtime state stays app-scoped
-//  (M5.1).
+//  The Dashboard and the Home pages form one horizontal sequence of spaces
+//  driven by `SpacePagerView`; a full-screen `.app` is shown instead of that
+//  pager. Both spaces forward a tapped tile's `featureID` through an
+//  `onOpenFeature` callback → `ShellStore.openApp`; `closeApp()` returns to the
+//  exact Home page / the Dashboard it was opened from. Feature runtime state
+//  stays app-scoped (M5.1).
 //
 
 import SwiftUI
@@ -27,6 +41,7 @@ struct DashboardShell: View {
     @EnvironmentObject private var registry: FeatureRegistry
     @EnvironmentObject private var layoutStore: DashboardLayoutStore
     @EnvironmentObject private var homeLayout: HomeLayoutStore
+    @EnvironmentObject private var locationStore: LocationStore
 
     @StateObject private var shell = ShellStore()
 
@@ -38,34 +53,45 @@ struct DashboardShell: View {
     /// The one grid the dashboard lays out on. Swappable in a single place.
     private let grid = DashboardGrid.standard
 
-    /// Presentation-only Home tiles for apps not built yet (not registered
-    /// features, not persisted). One place to drop them until each ships.
-    private static let comingSoonApps: [HomeComingSoonApp] = [
-        .init(title: "Music", symbolName: "music.note"),
-        .init(title: "Speedometer", symbolName: "gauge.open.with.lines.needle.33percent"),
-    ]
-
     var body: some View {
-        HStack(spacing: 0) {
-            SidebarView(
+        shellContainer
+            .logsKeyboardGeometry("shell-container")
+            .padding(DashMetrics.shellOuterInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Defence in depth (the real fix is `stopsRootKeyboardAvoidance()` at
+            // the app root): opt the fill frame out of the keyboard safe area so
+            // it is proposed the keyboard-inclusive height.
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .background(Color.black.ignoresSafeArea())
+            .preferredColorScheme(.dark)
+            .statusBarHidden(true)
+            .persistentSystemOverlays(.hidden)
+            .logsKeyboardGeometry("shell-root")
+            .animation(.easeInOut(duration: 0.25), value: shell.surface)
+    }
+
+    /// Rail + content as one rounded, clipped panel — the "automotive display".
+    /// The wallpaper is this panel's background, so it is clipped to the same
+    /// rounded rect and shares the same bounds.
+    private var shellContainer: some View {
+        let shape = RoundedRectangle(cornerRadius: DashMetrics.shellCornerRadius, style: .continuous)
+        return HStack(spacing: 0) {
+            DashSidebar(
                 shell: shell,
+                connection: connection,
+                location: locationStore,
                 manifests: registry.manifests,
-                connectedDeviceName: connection.pairedRelayDisplayName,
                 onDisconnect: { connection.disconnect() },
                 onForget: { connection.forgetPairedRelay() }
             )
 
-            Rectangle()
-                .fill(Color.dashSeparator)
-                .frame(width: DashMetrics.hairline)
-
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .dashScreenBackground()
-        .preferredColorScheme(.dark)
-        .animation(.easeInOut(duration: 0.2), value: shell.surface)
-        .animation(.easeInOut(duration: 0.2), value: shell.sidebarCollapsed)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DashShellBackground())
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(Color.white.opacity(0.08), lineWidth: DashMetrics.hairline))
     }
 
     @ViewBuilder
@@ -85,8 +111,7 @@ struct DashboardShell: View {
                 dashboardLayout: layoutStore,
                 dashboardEdit: dashboardEdit,
                 registry: registry,
-                grid: grid,
-                comingSoon: Self.comingSoonApps
+                grid: grid
             )
         }
     }
@@ -111,6 +136,5 @@ private struct MissingFeatureView: View {
                 .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .dashScreenBackground()
     }
 }

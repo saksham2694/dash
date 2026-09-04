@@ -79,22 +79,22 @@ nonisolated struct DashboardLayout: Equatable, Sendable, Codable {
 
 extension DashboardLayout {
 
-    /// A starter layout: the **one** Dashboard page, one feature shown at three
-    /// sizes — enough to show the grid handling multiple footprints and
-    /// positions. The caller passes the feature id so `Shell/` stays
-    /// feature-agnostic (`DashApp` supplies `MapFeature.id`).
+    /// The default Dashboard: the **large + 2 medium** composition — a
+    /// full-height feature surface on the left and two supporting widgets stacked
+    /// on the right (the canvas is fully tiled). The caller passes the feature id
+    /// so `Shell/` stays feature-agnostic (`DashApp` supplies `MapFeature.id`).
     ///
     /// There is exactly one Dashboard page — the product does not paginate the
     /// Dashboard. The page model is retained only for a possible future
     /// customisation feature.
     ///
-    /// Coordinates assume `DashboardGrid.standard` (6 × 4).
+    /// Coordinates assume `DashboardGrid.standard` (2 × 6).
     static func starter(featureID: FeatureID) -> DashboardLayout {
         DashboardLayout(pages: [
             DashboardPage(placements: [
-                WidgetPlacement(featureID: featureID, size: .large,   origin: GridPoint(column: 0, row: 0)),
-                WidgetPlacement(featureID: featureID, size: .medium,  origin: GridPoint(column: 0, row: 2)),
-                WidgetPlacement(featureID: featureID, size: .compact, origin: GridPoint(column: 3, row: 2)),
+                WidgetPlacement(featureID: featureID, size: .large,  origin: GridPoint(column: 0, row: 0)),
+                WidgetPlacement(featureID: featureID, size: .medium, origin: GridPoint(column: 1, row: 0)),
+                WidgetPlacement(featureID: featureID, size: .medium, origin: GridPoint(column: 1, row: 3)),
             ]),
         ])
     }

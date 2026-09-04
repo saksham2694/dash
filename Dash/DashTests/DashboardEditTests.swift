@@ -195,11 +195,11 @@ struct DashboardLayoutStoreCustomizationTests {
     private let idB = UUID()
     private let pageID = UUID()
 
-    /// Two edge-adjacent compacts on the single page — structurally valid.
+    /// Two compacts stacked in column 0 (rows 0..2 and 2..4) — structurally valid.
     private func baseLayout() -> DashboardLayout {
         DashboardLayout(pages: [DashboardPage(id: pageID, placements: [
             widget(idA, .compact, at: GridPoint(column: 0, row: 0)),
-            widget(idB, .compact, at: GridPoint(column: 2, row: 0)),
+            widget(idB, .compact, at: GridPoint(column: 0, row: 2)),
         ])])
     }
 
@@ -251,10 +251,10 @@ struct DashboardLayoutStoreCustomizationTests {
     @Test("updatePlacementSize is rejected when the result would overlap, and nothing persists")
     func resizeRejectedOnOverlap() {
         let defaults = ephemeralDefaults()
-        let s = store(defaults)          // idA compact @0, idB compact @2
+        let s = store(defaults)          // idA compact @ (0,0), idB compact @ (0,2)
         let before = signature(s.layout)
 
-        // idA → medium (3 cols) would cover cols 0..3 and collide with idB.
+        // idA → medium (rows 0..3) would collide with idB (rows 2..4).
         #expect(s.updatePlacementSize(id: idA, to: .medium) == false)
         #expect(signature(s.layout) == before)
 
@@ -265,9 +265,9 @@ struct DashboardLayoutStoreCustomizationTests {
     @Test("updatePlacementSize is rejected when the result would leave the grid")
     func resizeRejectedOutOfBounds() {
         let defaults = ephemeralDefaults()
-        // Compact in the last row; growing to medium (2 rows tall) runs off row 4.
+        // Compact near the bottom; growing to medium (3 rows tall) runs off row 6.
         let low = DashboardLayout(pages: [DashboardPage(id: pageID, placements: [
-            widget(idA, .compact, at: GridPoint(column: 0, row: 3)),
+            widget(idA, .compact, at: GridPoint(column: 0, row: 4)),
         ])])
         let s = DashboardLayoutStore(seed: low, defaults: defaults)
 
@@ -281,7 +281,7 @@ struct DashboardLayoutStoreCustomizationTests {
     func addValid() {
         let defaults = ephemeralDefaults()
         let s = store(defaults)
-        let added = widget(UUID(), .compact, at: GridPoint(column: 4, row: 0))
+        let added = widget(UUID(), .compact, at: GridPoint(column: 1, row: 0))
 
         #expect(s.addPlacement(added) == true)
         #expect(s.layout.allPlacements.map(\.id) == [idA, idB, added.id])
@@ -295,7 +295,7 @@ struct DashboardLayoutStoreCustomizationTests {
         let s = store(ephemeralDefaults())
         let before = signature(s.layout)
 
-        #expect(s.addPlacement(widget(UUID(), .compact, at: GridPoint(column: 1, row: 0))) == false)
+        #expect(s.addPlacement(widget(UUID(), .compact, at: GridPoint(column: 0, row: 1))) == false)
         #expect(signature(s.layout) == before)
     }
 
@@ -304,7 +304,7 @@ struct DashboardLayoutStoreCustomizationTests {
         let s = store(ephemeralDefaults())
         let before = signature(s.layout)
 
-        #expect(s.addPlacement(widget(UUID(), .compact, at: GridPoint(column: 5, row: 0))) == false)
+        #expect(s.addPlacement(widget(UUID(), .compact, at: GridPoint(column: 2, row: 0))) == false)
         #expect(signature(s.layout) == before)
     }
 
@@ -327,11 +327,11 @@ struct DashboardLayoutStoreCustomizationTests {
         let defaults = ephemeralDefaults()
         let s = store(defaults)
 
-        #expect(s.movePlacement(id: idB, to: GridPoint(column: 4, row: 3)) == true)
-        #expect(s.layout.allPlacements.first { $0.id == idB }?.origin == GridPoint(column: 4, row: 3))
+        #expect(s.movePlacement(id: idB, to: GridPoint(column: 1, row: 0)) == true)
+        #expect(s.layout.allPlacements.first { $0.id == idB }?.origin == GridPoint(column: 1, row: 0))
 
         let reloaded = DashboardLayoutStore(seed: baseLayout(), defaults: defaults)
-        #expect(reloaded.layout.allPlacements.first { $0.id == idB }?.origin == GridPoint(column: 4, row: 3))
+        #expect(reloaded.layout.allPlacements.first { $0.id == idB }?.origin == GridPoint(column: 1, row: 0))
     }
 
     @Test("movePlacement is rejected when the target would overlap or leave the grid")
@@ -340,7 +340,7 @@ struct DashboardLayoutStoreCustomizationTests {
         let before = signature(s.layout)
 
         #expect(s.movePlacement(id: idB, to: GridPoint(column: 0, row: 0)) == false) // onto idA
-        #expect(s.movePlacement(id: idB, to: GridPoint(column: 5, row: 0)) == false) // cols 5..7 > 6
+        #expect(s.movePlacement(id: idB, to: GridPoint(column: 2, row: 0)) == false) // column 2 off grid
         #expect(signature(s.layout) == before)
     }
 
@@ -362,9 +362,9 @@ struct DashboardLayoutStoreCustomizationTests {
         let afterValid = signature(s.layout)
 
         // …then several rejected ones.
-        #expect(s.addPlacement(widget(UUID(), .compact, at: GridPoint(column: 1, row: 0))) == false)
+        #expect(s.addPlacement(widget(UUID(), .compact, at: GridPoint(column: 0, row: 2))) == false)
         #expect(s.updatePlacementSize(id: idB, to: .full) == false)
-        #expect(s.movePlacement(id: idB, to: GridPoint(column: 6, row: 0)) == false)
+        #expect(s.movePlacement(id: idB, to: GridPoint(column: 2, row: 0)) == false)
 
         #expect(signature(s.layout) == afterValid)
         let reloaded = DashboardLayoutStore(seed: baseLayout(), defaults: defaults)

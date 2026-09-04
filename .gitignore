@@ -1,2 +1,11 @@
 # Secrets — supplied locally / via CI, never committed
 Dash/Config/GoogleMapsService.xcconfig
+
+# Local-only development assets (proprietary / third-party artwork the developer
+# drops in for their private device build). The app builds without these — see
+# DashLocalAssets.swift for the fallbacks. Never commit these.
+# `Dash/Dash/LocalAssets/` is the one the app bundles + resolves; the sibling
+# path is ignored too so a misplaced drop is never committed either.
+Dash/Dash/LocalAssets/
+Dash/LocalAssets/
+.DS_Store

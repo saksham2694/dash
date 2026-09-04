@@ -67,6 +67,8 @@ extension FeatureRegistry {
     static func makeDefault() -> FeatureRegistry {
         FeatureRegistry([
             MapFeature(),
+            PlaceholderFeature.music(),
+            PlaceholderFeature.speedometer(),
         ])
     }
 }

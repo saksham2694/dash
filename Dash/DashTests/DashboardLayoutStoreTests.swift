@@ -83,11 +83,12 @@ struct DashboardLayoutStoreTests {
     func invalidPersistedLayoutFallsBack() {
         let defaults = ephemeralDefaults()
 
-        // Two overlapping compacts — replace() persists whatever it is given…
+        // Two overlapping compacts (same column, rows 0..2 and 1..3) — replace()
+        // persists whatever it is given…
         let overlapping = DashboardLayout(pages: [
             DashboardPage(placements: [
                 WidgetPlacement(featureID: "maps", size: .compact, origin: GridPoint(column: 0, row: 0)),
-                WidgetPlacement(featureID: "maps", size: .compact, origin: GridPoint(column: 1, row: 0)),
+                WidgetPlacement(featureID: "maps", size: .compact, origin: GridPoint(column: 0, row: 1)),
             ])
         ])
         DashboardLayoutStore(seed: seed, defaults: defaults).replace(with: overlapping)
@@ -98,8 +99,22 @@ struct DashboardLayoutStoreTests {
 
     @Test("the storage key and schema version are the documented constants")
     func constants() {
-        #expect(DashboardLayoutStore.storageKey == "shell.dashboardLayout.v1")
+        #expect(DashboardLayoutStore.storageKey == "shell.dashboardLayout.v2")
         #expect(DashboardLayoutStore.schemaVersion == 1)
+    }
+
+    @Test("a layout from the old 6×4 grid is abandoned in favour of the seed")
+    func oldGridLayoutFallsBack() throws {
+        let defaults = ephemeralDefaults()
+        // An old-style layout: a compact at column 3 — off the new 2-column grid.
+        let oldLayout = DashboardLayout(pages: [DashboardPage(placements: [
+            WidgetPlacement(featureID: "maps", size: .compact, origin: GridPoint(column: 3, row: 2)),
+        ])])
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(oldLayout))
+        let envelope = try JSONSerialization.data(withJSONObject: ["version": 1, "layout": json])
+        defaults.set(envelope, forKey: DashboardLayoutStore.storageKey)
+
+        #expect(DashboardLayoutStore(seed: seed, defaults: defaults).layout == seed)
     }
 }
 

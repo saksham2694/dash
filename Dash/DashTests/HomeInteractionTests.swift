@@ -17,13 +17,13 @@ import Testing
 // MARK: - The tile forwards the right id
 
 @MainActor
-@Suite("HomeAppTileButton tap")
+@Suite("HomeAppTile tap")
 struct HomeTileTapTests {
 
     @Test("tapping a tile requests its own feature id")
     func requestsFeatureID() {
         var requested: [FeatureID] = []
-        HomeAppTileButton(manifest: nil, featureID: "maps", onOpen: { requested.append($0) }).activate()
+        HomeAppTile(manifest: nil, featureID: "maps", onOpen: { requested.append($0) }).activate()
         #expect(requested == ["maps"])
     }
 
@@ -32,8 +32,8 @@ struct HomeTileTapTests {
         var requested: [FeatureID] = []
         let sink: (FeatureID) -> Void = { requested.append($0) }
 
-        HomeAppTileButton(manifest: nil, featureID: "maps", onOpen: sink).activate()
-        HomeAppTileButton(manifest: nil, featureID: "speedometer", onOpen: sink).activate()
+        HomeAppTile(manifest: nil, featureID: "maps", onOpen: sink).activate()
+        HomeAppTile(manifest: nil, featureID: "speedometer", onOpen: sink).activate()
 
         #expect(requested == ["maps", "speedometer"])
     }
@@ -42,7 +42,7 @@ struct HomeTileTapTests {
     func featureAgnostic() {
         var requested: [FeatureID] = []
         // No manifest (feature not registered) — still just forwards the id.
-        HomeAppTileButton(manifest: nil, featureID: "future-app", onOpen: { requested.append($0) }).activate()
+        HomeAppTile(manifest: nil, featureID: "future-app", onOpen: { requested.append($0) }).activate()
         #expect(requested == ["future-app"])
     }
 }
@@ -75,7 +75,7 @@ struct HomeSpaceViewTests {
 
         #expect(home.featureIDs.contains(MapFeature.id))
         // …and the id resolves to a real manifest for the tile.
-        #expect(registry.feature(MapFeature.id)?.manifest.title == "Maps")
+        #expect(registry.feature(MapFeature.id)?.manifest.title == "Google Maps")
     }
 
     @Test("featureIDs are exactly the page's apps, in slot order")

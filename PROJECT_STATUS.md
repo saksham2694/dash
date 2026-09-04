@@ -2812,3 +2812,112 @@ Status: Implemented.
 - No commit was made by Claude.
 
 Next: M5.4.0 — Speedometer feature (a second real `DashFeature`; sidebar + Home + dashboard widget presentations).
+
+## M5.3.1 — Corrected horizontal space navigation + Home launcher
+
+Status: Implemented.
+
+- One Dashboard space with no Dashboard pagination.
+- Home automatically paginates only when registered app count exceeds capacity.
+- Horizontal sequence is Dashboard ↔ Home page 0 ↔ Home page 1 ↔ ...
+- Sidebar remains direct navigation.
+- Home uses deterministic 4×4 top-left-first app placement.
+- Home page dots appear only when multiple Home pages exist.
+- Dashboard page controls/dots removed.
+- Physically verified on iPad.
+- DashTests: 401/401 at milestone.
+- Build clean.
+
+## M5.4.1 — Dashboard customization foundation
+
+Status: Implemented.
+
+- Added Dashboard edit mode owned by DashboardShell via DashboardEditModel.
+- Added pure DashboardLayoutEditor transforms for add/remove/resize/move.
+- DashboardLayoutStore now exposes validated mutation APIs.
+- Edit mode disables normal widget activation and shows editing state.
+- Layout validation remains centralized and persistence remains in DashboardLayoutStore.
+- Feature-agnostic; no feature imports Shell.
+- Physically verified on iPad.
+- DashTests: 426/426.
+- Build clean.
+
+## M5.4.2 — Dashboard widget editing UI
+
+Status: Implemented.
+
+- Added custom Add Widget picker driven by FeatureRegistry manifests.
+- Added automatic deterministic first-free-slot placement.
+- Added edit-mode remove controls.
+- Added feature-aware size selection.
+- Invalid add/resize operations are rejected without corrupting persisted layout.
+- Dashboard remains single-page.
+- Normal widget → full-screen behavior preserved.
+- Physically verified on iPad.
+- DashTests: 447/447.
+- Build clean.
+
+## M5.4.3 — Dashboard drag/resize editing
+
+Status: Implemented.
+
+- Added grid-snapped drag-to-move with live valid/invalid ghost feedback.
+- Added interactive resize through supported ComponentSize values.
+- Pixel geometry isolated in DashboardGridGeometry.
+- Layout mutations persist only once at interaction completion.
+- Fixed physical drag jitter by using a stable global gesture coordinate space.
+- Removed implicit animation fighting the live drag; animation is scoped to the ghost/settle behavior.
+- Moved size menu to bottom-leading and resize handle to bottom-trailing.
+- Physically tested on iPad; drag/resize now feels smooth and responsive.
+- DashTests: 467/467.
+- Build clean.
+
+## M5.5.1 — CarPlay visual foundation
+
+Status: Implemented.
+
+- Added centralized DashTheme with dark automotive palette, typography roles, metrics, and reusable surface helpers.
+- Applied theme to Dashboard, Home, Sidebar, shell chrome, widget editing UI, and widget picker.
+- Established dark high-contrast surface hierarchy and restrained accent usage.
+- Removed unnecessary glass/material treatment from themed shell surfaces.
+- Added WCAG contrast guardrail tests.
+- Dashboard/Home navigation and customization behavior unchanged.
+- MapFeature/map rendering untouched.
+- Physically verified on iPad and visually approved.
+- DashTests: 477/477.
+- Build clean.
+
+Status update covers M5.3.1 through M5.5.1; no implementation changes made.
+
+## M5.5.3 — Keyboard / shell movement fix
+
+Status: Implemented. Physical iPad acceptance test PASSED.
+
+- Symptom: focusing the Google Maps search field slid the entire rounded Dash
+  shell (border, sidebar, map, wallpaper) slightly upward when the keyboard
+  appeared.
+- Root cause: SwiftUI's App-lifecycle keyboard avoidance inflates the root
+  `_UIHostingView`'s safe-area insets when a text field becomes first responder,
+  so the whole view tree is proposed a reduced layout height; the shell's
+  `frame(maxHeight: .infinity)` is centre-aligned, so the shorter shell was
+  re-centred — a small upward shift. SwiftUI-level `.ignoresSafeArea(.keyboard)`
+  does not change what the hosting view itself reports, so it could not prevent
+  this on device.
+- Fix: `ShellKeyboardStability` neutralises keyboard avoidance on the root
+  `_UIHostingView` directly — a runtime subclass whose `safeAreaInsets` getter
+  returns the window's physical insets (never the keyboard-inflated value), plus
+  no-ops of any `keyboardWill*` handlers. Applied once via
+  `.stopsRootKeyboardAvoidance()` on `RootView`. Existing
+  `.ignoresSafeArea(.keyboard)` at the WindowGroup root / `DashboardShell` /
+  `MapFullScreenView` kept as defense-in-depth.
+- No offsets, no keyboard-height calculations, no Maps-specific positioning
+  hacks, no animation masking. `DashboardShell` layout and all visual styling
+  unchanged.
+- On device: shell, sidebar, dashboard/map, wallpaper and rounded border stay
+  exactly stationary when the keyboard appears; the keyboard overlays the map
+  normally; Google Maps search field, typing and suggestions work; dismissing
+  the keyboard returns with no jump. Verified repeatedly.
+- Temporary keyboard-geometry diagnostic logging left in place but disabled
+  (`ShellDiagnostics.logKeyboardGeometry = false`).
+- DashTests: 526/526. Build clean.
+- Nothing committed.

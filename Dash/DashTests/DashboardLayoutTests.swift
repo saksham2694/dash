@@ -84,24 +84,26 @@ struct DashboardLayoutModelTests {
 @Suite("DashboardGrid")
 struct DashboardGridTests {
 
-    let grid = DashboardGrid.standard
+    let grid = DashboardGrid.standard   // 2 × 6
 
-    @Test("widget sizes map to cell spans; full spans the whole grid")
+    @Test("widgets are one column wide; the size picks the height; full spans the grid")
     func spans() {
-        #expect(grid.span(for: .compact) == GridSpan(columns: 2, rows: 1))
-        #expect(grid.span(for: .medium) == GridSpan(columns: 3, rows: 2))
-        #expect(grid.span(for: .large) == GridSpan(columns: 6, rows: 2))
-        #expect(grid.span(for: .full) == GridSpan(columns: 6, rows: 4))
+        #expect(grid.span(for: .compact) == GridSpan(columns: 1, rows: 2))
+        #expect(grid.span(for: .medium) == GridSpan(columns: 1, rows: 3))
+        #expect(grid.span(for: .large) == GridSpan(columns: 1, rows: 6))
+        #expect(grid.span(for: .full) == GridSpan(columns: 2, rows: 6))
     }
 
     @Test("contains checks the full footprint")
     func bounds() {
+        // large (1×6) fills a column exactly.
         #expect(grid.contains(grid.rect(for: placement("maps", .large, at: .init(column: 0, row: 0)))))
-        #expect(grid.contains(grid.rect(for: placement("maps", .medium, at: .init(column: 3, row: 2)))))
-        // large (6×2) starting at row 3 → maxRow 5 > 4
-        #expect(!grid.contains(grid.rect(for: placement("maps", .large, at: .init(column: 0, row: 3)))))
-        // compact (2×1) starting at column 5 → maxColumn 7 > 6
-        #expect(!grid.contains(grid.rect(for: placement("maps", .compact, at: .init(column: 5, row: 0)))))
+        // medium (1×3) in the second column, bottom half.
+        #expect(grid.contains(grid.rect(for: placement("maps", .medium, at: .init(column: 1, row: 3)))))
+        // large (1×6) starting at row 1 → maxRow 7 > 6
+        #expect(!grid.contains(grid.rect(for: placement("maps", .large, at: .init(column: 0, row: 1)))))
+        // any widget in column 2 → maxColumn 3 > 2
+        #expect(!grid.contains(grid.rect(for: placement("maps", .compact, at: .init(column: 2, row: 0)))))
     }
 
     @Test("intersects is true only when cells are shared")
@@ -131,8 +133,9 @@ struct DashboardLayoutValidatorStructuralTests {
 
     @Test("overlapping placements on a page are reported")
     func overlap() {
+        // Two compacts in the same column, rows 0..2 and 1..3 → they share row 1.
         let a = placement("maps", .compact, at: .init(column: 0, row: 0))
-        let b = placement("maps", .compact, at: .init(column: 1, row: 0))
+        let b = placement("maps", .compact, at: .init(column: 0, row: 1))
         let layout = DashboardLayout(pages: [DashboardPage(placements: [a, b])])
         let issues = DashboardLayoutValidator.validate(layout, grid: grid)
         #expect(issues.contains(.overlap(a.id, b.id)))
@@ -151,7 +154,7 @@ struct DashboardLayoutValidatorStructuralTests {
 
     @Test("a widget past the grid edge is out of bounds")
     func outOfBounds() {
-        let p = placement("maps", .large, at: .init(column: 0, row: 3))
+        let p = placement("maps", .large, at: .init(column: 0, row: 1))   // 1×6 → maxRow 7 > 6
         let layout = DashboardLayout(pages: [DashboardPage(placements: [p])])
         #expect(DashboardLayoutValidator.validate(layout, grid: grid).contains(.outOfBounds(placementID: p.id)))
     }
@@ -167,7 +170,7 @@ struct DashboardLayoutValidatorStructuralTests {
     func duplicateID() {
         let shared = UUID()
         let a = placement("maps", .compact, at: .init(column: 0, row: 0), id: shared)
-        let b = placement("maps", .compact, at: .init(column: 3, row: 0), id: shared)
+        let b = placement("maps", .compact, at: .init(column: 1, row: 0), id: shared)
         let layout = DashboardLayout(pages: [DashboardPage(placements: [a, b])])
         let issues = DashboardLayoutValidator.validate(layout, grid: grid)
         #expect(issues.filter { $0 == .duplicatePlacementID(shared) }.count == 1)

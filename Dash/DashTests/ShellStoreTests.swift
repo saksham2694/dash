@@ -96,11 +96,10 @@ struct ShellSpacesTests {
 @Suite("ShellStore")
 struct ShellStoreTests {
 
-    @Test("starts on the default surface with the sidebar expanded")
+    @Test("starts on the default surface")
     func initialState() {
         let store = ShellStore()
         #expect(store.surface == .home(page: 0))
-        #expect(store.sidebarCollapsed == false)
     }
 
     @Test("showHome / showDashboard switch spaces and page")
@@ -187,15 +186,20 @@ struct ShellStoreTests {
         #expect(store.surface == .app("maps")) // no-op while a full-screen app is open
     }
 
-    @Test("toggleSidebar flips the collapsed flag")
-    func toggleSidebar() {
-        let store = ShellStore()
+    @Test("toggleHomeDashboard swaps between the Dashboard and Home")
+    func toggleHomeDashboard() {
+        let store = ShellStore()   // starts on Home page 0
 
-        store.toggleSidebar()
-        #expect(store.sidebarCollapsed)
+        store.toggleHomeDashboard()
+        #expect(store.surface == .dashboard)
 
-        store.toggleSidebar()
-        #expect(!store.sidebarCollapsed)
+        store.toggleHomeDashboard()
+        #expect(store.surface == .home(page: 0))
+
+        // From a full-screen app it lands on the Dashboard.
+        store.openApp("maps")
+        store.toggleHomeDashboard()
+        #expect(store.surface == .dashboard)
     }
 
     @Test("a store created on an app surface still returns somewhere sane")

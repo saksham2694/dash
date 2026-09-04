@@ -13,6 +13,11 @@
 //  holds only local presentation state (whether the dialog is open). All session
 //  and pairing logic stays in `ConnectionCoordinator`.
 //
+//  M5.5.2: styled to sit in the navigation rail — a solid `dashCard` chip (not a
+//  frosted capsule), a small `dashPositive` "connected" dot, and an icon-only
+//  form when the rail is collapsed. Behaviour (the Disconnect / Forget dialog)
+//  is unchanged.
+//
 
 import SwiftUI
 
@@ -20,6 +25,9 @@ struct ConnectedControlView: View {
 
     /// Friendly name of the paired relay, if known.
     let deviceName: String?
+
+    /// Whether the rail is collapsed (icon-only form).
+    var collapsed: Bool = false
 
     /// End the active session; keep the pairing.
     let onDisconnect: () -> Void
@@ -41,18 +49,33 @@ struct ConnectedControlView: View {
         Button {
             showingOptions = true
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: DashMetrics.spacingTight) {
                 Image(systemName: "iphone.gen3")
-                Text(label).lineLimit(1)
-                Image(systemName: "chevron.down").font(.caption2)
+                    .overlay(alignment: .topTrailing) {
+                        Circle()
+                            .fill(Color.dashPositive)
+                            .frame(width: 7, height: 7)
+                            .offset(x: 3, y: -1)
+                    }
+                if !collapsed {
+                    Text(label).lineLimit(1).minimumScaleFactor(0.8)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down").font(.caption2)
+                }
             }
-            .font(.footnote.weight(.medium))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(.ultraThinMaterial, in: Capsule())
+            .font(.dashLabel)
+            .foregroundStyle(Color.dashTextPrimary)
+            .padding(.horizontal, DashMetrics.spacingSmall)
+            .frame(maxWidth: .infinity)
+            .frame(height: DashMetrics.controlHeight)
+            .background(
+                Color.dashCard,
+                in: RoundedRectangle(cornerRadius: DashMetrics.controlCornerRadius, style: .continuous)
+            )
         }
-        .buttonStyle(.plain)
-        .tint(.primary)
+        .buttonStyle(.dashPress)
+        .accessibilityLabel(collapsed ? "\(label), connected" : label)
+        .accessibilityHint("Disconnect or forget this iPhone")
         .confirmationDialog(label, isPresented: $showingOptions, titleVisibility: .visible) {
             Button("Disconnect") { onDisconnect() }
             Button("Forget \(label)", role: .destructive) { onForget() }
@@ -65,14 +88,21 @@ struct ConnectedControlView: View {
 
 #Preview("Named") {
     ZStack {
-        Color.black.opacity(0.8).ignoresSafeArea()
+        Color.dashSurface.ignoresSafeArea()
         ConnectedControlView(deviceName: "Saksham’s iPhone", onDisconnect: {}, onForget: {})
+    }
+}
+
+#Preview("Collapsed") {
+    ZStack {
+        Color.dashSurface.ignoresSafeArea()
+        ConnectedControlView(deviceName: "Saksham’s iPhone", collapsed: true, onDisconnect: {}, onForget: {})
     }
 }
 
 #Preview("Unnamed") {
     ZStack {
-        Color.black.opacity(0.8).ignoresSafeArea()
+        Color.dashSurface.ignoresSafeArea()
         ConnectedControlView(deviceName: nil, onDisconnect: {}, onForget: {})
     }
 }

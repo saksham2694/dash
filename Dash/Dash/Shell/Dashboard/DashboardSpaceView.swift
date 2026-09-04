@@ -30,10 +30,13 @@
 //  ghost animates its cell-to-cell snap, and the drag-end settle is one
 //  explicit `withAnimation`.
 //
-//  M5.5.1: colours / radii / spacing / typography now come from `DashTheme`
-//  (`Color.dash*`, `Font.dash*`, `DashMetrics`, `.dashCardSurface()`). Layout,
-//  grid, editing and drag behaviour are unchanged. The invalid drag ghost also
-//  carries an ✗ glyph so "invalid" reads without relying on colour.
+//  M5.5.1: colours / radii / spacing / typography come from `DashTheme`.
+//
+//  M5.5.2a: the dashboard is a two-column, six-row canvas (`DashboardGrid` 2×6)
+//  so the CarPlay-style compositions (large + 2 medium / large + 3 compact)
+//  tile the whole canvas with no half-width voids. Widgets sit on translucent
+//  `.dashGlassSurface()` panels over `DashShellBackground`; this view draws no
+//  ground of its own. Editing / drag / persistence behaviour is unchanged.
 //
 
 import SwiftUI
@@ -64,12 +67,16 @@ struct DashboardSpaceView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            gridBody(geometry: DashboardGridGeometry(grid: grid, canvas: proxy.size, gap: Self.gap))
+            gridBody(geometry: DashboardGridGeometry(
+                grid: grid,
+                canvas: proxy.size,
+                gap: Self.gap,
+                leftColumnFraction: DashMetrics.dashboardLeftColumnFraction
+            ))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(DashMetrics.screenInset)
+        .padding(DashMetrics.shellContentInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.dashBackground)
         .overlay(alignment: .topTrailing) {
             editControls.padding(DashMetrics.spacingMedium)
         }
@@ -242,14 +249,16 @@ struct DashboardSpaceView: View {
         .font(.dashControl)
         .padding(.horizontal, DashMetrics.spacingMedium)
         .padding(.vertical, DashMetrics.spacingSmall)
-        .background(Capsule().fill(filled ? Color.dashAccent : Color.dashCard))
-        .overlay(
-            Capsule().strokeBorder(
-                filled ? Color.clear : Color.dashSeparator,
-                lineWidth: DashMetrics.hairline
-            )
-        )
+        .background {
+            if filled {
+                Capsule().fill(Color.dashAccent)
+            } else {
+                Capsule().fill(.ultraThinMaterial).overlay(Capsule().fill(Color.dashPanelTint))
+            }
+        }
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: DashMetrics.hairline))
         .foregroundStyle(filled ? Color.dashOnAccent : Color.dashTextPrimary)
+        .clipShape(Capsule())
     }
 
     // MARK: - Alerts
@@ -395,6 +404,7 @@ struct DashboardSpaceView: View {
                 .foregroundStyle(Color.dashTextSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .dashGlassSurface()
     }
 }
 
@@ -464,7 +474,7 @@ struct WidgetHostView: View {
 
     private var styledContent: some View {
         content
-            .dashCardSurface()
+            .dashGlassSurface()
             .contentShape(RoundedRectangle(cornerRadius: DashMetrics.cardCornerRadius, style: .continuous))
     }
 

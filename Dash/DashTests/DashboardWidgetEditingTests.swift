@@ -61,7 +61,7 @@ private func manifest(_ sizes: Set<ComponentSize>) -> FeatureManifest {
 @Suite("DashboardLayoutEditor.firstFreeOrigin")
 struct FirstFreeOriginTests {
 
-    let grid = DashboardGrid.standard   // 6 × 4
+    let grid = DashboardGrid.standard   // 2 × 6
 
     @Test("an empty page places a widget at the very top-left")
     func emptyPage() {
@@ -71,25 +71,25 @@ struct FirstFreeOriginTests {
         #expect(origin == GridPoint(column: 0, row: 0))
     }
 
-    @Test("a large widget across the top pushes the next one to the first free row")
-    func belowALarge() {
-        let l = layout([widget(.large, at: GridPoint(column: 0, row: 0))]) // rows 0..2
+    @Test("a large widget filling the left column pushes the next one to the right column")
+    func besideALarge() {
+        let l = layout([widget(.large, at: GridPoint(column: 0, row: 0))]) // fills column 0
         #expect(
             DashboardLayoutEditor.firstFreeOrigin(for: .compact, onPageAt: 0, in: l, grid: grid)
-                == GridPoint(column: 0, row: 2)
+                == GridPoint(column: 1, row: 0)
         )
     }
 
-    @Test("scans left-to-right within a row, then down — matching the starter layout's gap")
+    @Test("scans left-to-right within a row, then down")
     func deterministicScan() {
-        // large across rows 0..2, medium in the bottom-left (cols 0..3, rows 2..4).
+        // large fills column 0; a medium fills the top half of column 1.
         let l = layout([
             widget(.large, at: GridPoint(column: 0, row: 0)),
-            widget(.medium, at: GridPoint(column: 0, row: 2)),
+            widget(.medium, at: GridPoint(column: 1, row: 0)),
         ])
         #expect(
             DashboardLayoutEditor.firstFreeOrigin(for: .compact, onPageAt: 0, in: l, grid: grid)
-                == GridPoint(column: 3, row: 2)
+                == GridPoint(column: 1, row: 3)
         )
     }
 
@@ -97,8 +97,8 @@ struct FirstFreeOriginTests {
     func neverOverlaps() {
         let existing = [
             widget(.large, at: GridPoint(column: 0, row: 0)),
-            widget(.compact, at: GridPoint(column: 0, row: 2)),
-            widget(.compact, at: GridPoint(column: 2, row: 3)),
+            widget(.compact, at: GridPoint(column: 1, row: 0)),
+            widget(.compact, at: GridPoint(column: 1, row: 2)),
         ]
         let l = layout(existing)
 
@@ -117,10 +117,10 @@ struct FirstFreeOriginTests {
 
     @Test("a full dashboard has no free slot")
     func fullDashboard() {
-        // Two larges (6×2 each) tile the whole 6×4 grid.
+        // Two larges tile both columns.
         let full = layout([
             widget(.large, at: GridPoint(column: 0, row: 0)),
-            widget(.large, at: GridPoint(column: 0, row: 2)),
+            widget(.large, at: GridPoint(column: 1, row: 0)),
         ])
         for size in ComponentSize.widgetSizes {
             #expect(DashboardLayoutEditor.firstFreeOrigin(for: size, onPageAt: 0, in: full, grid: grid) == nil)
@@ -158,7 +158,7 @@ struct AddWidgetTests {
         }
         let added = s.layout.allPlacements.first { $0.id == newID }
         #expect(added?.size == .compact)
-        #expect(added?.origin == GridPoint(column: 0, row: 2)) // first free row under the large
+        #expect(added?.origin == GridPoint(column: 1, row: 0)) // right column, beside the large
 
         let reloaded = DashboardLayoutStore(seed: seed, defaults: defaults)
         #expect(reloaded.layout.allPlacements.contains { $0.id == newID })
@@ -169,7 +169,7 @@ struct AddWidgetTests {
         let defaults = ephemeralDefaults()
         let full = layout([
             widget(.large, at: GridPoint(column: 0, row: 0)),
-            widget(.large, at: GridPoint(column: 0, row: 2)),
+            widget(.large, at: GridPoint(column: 1, row: 0)),
         ])
         let s = store(full, defaults)
         let before = s.layout.allPlacements.count
@@ -326,10 +326,10 @@ struct DashboardEditingPersistenceTests {
     @Test("an invalid size change leaves the stored layout untouched")
     func invalidResizeIsInert() {
         let defaults = ephemeralDefaults()
-        // Two compacts that would collide if the first grows to medium.
+        // Two compacts stacked in one column — the first can't grow to medium.
         let two = DashboardLayout(pages: [DashboardPage(id: pageID, placements: [
             widget(.compact, at: GridPoint(column: 0, row: 0), id: idA),
-            widget(.compact, at: GridPoint(column: 2, row: 0)),
+            widget(.compact, at: GridPoint(column: 0, row: 2)),
         ])])
         let s = DashboardLayoutStore(seed: two, defaults: defaults)
 

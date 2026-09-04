@@ -64,76 +64,80 @@ private func signature(_ layout: DashboardLayout) -> [String] {
 @Suite("DashboardGridGeometry")
 struct DashboardGridGeometryTests {
 
-    // 6×4 grid, 600×400 canvas, no gap → 100×100 cells, 100 step.
+    // The standard 2×6 grid on a 600×600 canvas, no gap → 300×100 cells.
     private let geo = DashboardGridGeometry(
-        grid: .standard, canvas: CGSize(width: 600, height: 400), gap: 0
+        grid: .standard, canvas: CGSize(width: 600, height: 600), gap: 0
     )
-    private let compact = GridSpan(columns: 2, rows: 1)
-    private let large = GridSpan(columns: 6, rows: 2)
+    private let compact = GridSpan(columns: 1, rows: 2)   // .compact on 2×6
+    private let large = GridSpan(columns: 1, rows: 6)     // .large on 2×6
 
     @Test("cell and frame math")
     func frames() {
-        #expect(geo.cell == CGSize(width: 100, height: 100))
-        #expect(geo.frame(origin: GridPoint(column: 2, row: 1), span: compact)
-                == CGRect(x: 200, y: 100, width: 200, height: 100))
-        #expect(geo.size(of: GridSpan(columns: 3, rows: 2)) == CGSize(width: 300, height: 200))
+        #expect(geo.cell == CGSize(width: 300, height: 100))
+        #expect(geo.frame(origin: GridPoint(column: 1, row: 1), span: compact)
+                == CGRect(x: 300, y: 100, width: 300, height: 200))
+        #expect(geo.size(of: GridSpan(columns: 1, rows: 3)) == CGSize(width: 300, height: 300))
     }
 
     @Test("interior gaps are included in a span's pixel size")
     func gapsInSpan() {
-        let g = DashboardGridGeometry(grid: .standard, canvas: CGSize(width: 612, height: 412), gap: 12)
-        // cellW = (612 - 12*5)/6 = 92 ; span of 2 columns = 92*2 + 12 = 196
-        #expect(g.size(of: GridSpan(columns: 2, rows: 1)).width == 196)
+        // cellH = (640 - 20*5)/6 = 90 ; a 1×2 span = 90*2 + 20 = 200
+        let g = DashboardGridGeometry(grid: .standard, canvas: CGSize(width: 620, height: 640), gap: 20)
+        #expect(g.size(of: GridSpan(columns: 1, rows: 2)).height == 200)
     }
 
     @Test("a drag point snaps to the nearest cell")
     func snapsToNearest() {
         #expect(geo.snappedOrigin(pixelTopLeft: CGPoint(x: 0, y: 0), span: compact) == GridPoint(column: 0, row: 0))
-        #expect(geo.snappedOrigin(pixelTopLeft: CGPoint(x: 140, y: 40), span: compact) == GridPoint(column: 1, row: 0))
-        #expect(geo.snappedOrigin(pixelTopLeft: CGPoint(x: 160, y: 60), span: compact) == GridPoint(column: 2, row: 1))
+        #expect(geo.snappedOrigin(pixelTopLeft: CGPoint(x: 160, y: 40), span: compact) == GridPoint(column: 1, row: 0))
+        #expect(geo.snappedOrigin(pixelTopLeft: CGPoint(x: 140, y: 120), span: compact) == GridPoint(column: 0, row: 1))
     }
 
     @Test("snapping clamps so the footprint never leaves the grid")
     func snapClampsInBounds() {
-        // Far past the bottom-right: a 2×1 clamps to (4,3) on a 6×4 grid.
-        #expect(geo.snappedOrigin(pixelTopLeft: CGPoint(x: 9_999, y: 9_999), span: compact) == GridPoint(column: 4, row: 3))
+        // Far past the bottom-right: a 1×2 clamps to (1,4) — max column 1, max row 4.
+        #expect(geo.snappedOrigin(pixelTopLeft: CGPoint(x: 9_999, y: 9_999), span: compact) == GridPoint(column: 1, row: 4))
         // Negative: clamps to the origin.
         #expect(geo.snappedOrigin(pixelTopLeft: CGPoint(x: -80, y: -80), span: compact) == GridPoint(column: 0, row: 0))
-        // A large (6×2) can only ever sit at column 0, rows 0…2.
-        #expect(geo.snappedOrigin(pixelTopLeft: CGPoint(x: 300, y: 260), span: large) == GridPoint(column: 0, row: 2))
+        // A large (1×6) can only ever sit at row 0 (of either column).
+        #expect(geo.snappedOrigin(pixelTopLeft: CGPoint(x: 320, y: 260), span: large) == GridPoint(column: 1, row: 0))
     }
 
     @Test("proposedOrigin applies the drag translation once, as a pure delta")
     func proposedOriginIsAPureDelta() {
         // No movement → same cell.
-        #expect(geo.proposedOrigin(movingFrom: GridPoint(column: 2, row: 1), span: compact, by: .zero)
-                == GridPoint(column: 2, row: 1))
+        #expect(geo.proposedOrigin(movingFrom: GridPoint(column: 1, row: 1), span: compact, by: .zero)
+                == GridPoint(column: 1, row: 1))
 
-        // A whole number of cells of translation shifts the origin by exactly
-        // that many cells — no fractional drift, no oscillation.
-        for cells in 0...4 {
+        // A whole number of cells of translation shifts the origin exactly.
+        for cells in 0...1 {
             let t = CGSize(width: CGFloat(cells) * geo.step.width, height: 0)
             #expect(geo.proposedOrigin(movingFrom: GridPoint(column: 0, row: 0), span: compact, by: t)
                     == GridPoint(column: cells, row: 0))
         }
+        for rows in 0...4 {
+            let t = CGSize(width: 0, height: CGFloat(rows) * geo.step.height)
+            #expect(geo.proposedOrigin(movingFrom: GridPoint(column: 0, row: 0), span: compact, by: t)
+                    == GridPoint(column: 0, row: rows))
+        }
 
-        // Half a cell rounds up to the next cell.
+        // Half a cell rounds to the next.
         #expect(geo.proposedOrigin(movingFrom: GridPoint(column: 0, row: 0), span: compact,
-                                   by: CGSize(width: geo.step.width * 1.5, height: 0))
-                == GridPoint(column: 2, row: 0))
+                                   by: CGSize(width: geo.step.width * 0.5, height: 0))
+                == GridPoint(column: 1, row: 0))
     }
 
     @Test("proposedOrigin clamps a drag past the edge to the last in-bounds cell")
     func proposedOriginClamps() {
-        #expect(geo.proposedOrigin(movingFrom: GridPoint(column: 2, row: 2), span: compact,
+        #expect(geo.proposedOrigin(movingFrom: GridPoint(column: 1, row: 3), span: compact,
                                    by: CGSize(width: 9_999, height: 9_999))
-                == GridPoint(column: 4, row: 3))
-        #expect(geo.proposedOrigin(movingFrom: GridPoint(column: 4, row: 3), span: compact,
+                == GridPoint(column: 1, row: 4))
+        #expect(geo.proposedOrigin(movingFrom: GridPoint(column: 1, row: 4), span: compact,
                                    by: CGSize(width: -9_999, height: -9_999))
                 == GridPoint(column: 0, row: 0))
-        // A large widget dragged anywhere still only fits at column 0.
+        // A large widget dragged anywhere still only fits at row 0.
         #expect(geo.proposedOrigin(movingFrom: GridPoint(column: 0, row: 0), span: large,
-                                   by: CGSize(width: 500, height: 40)).column == 0)
+                                   by: CGSize(width: 500, height: 400)).row == 0)
     }
 }
 
@@ -203,12 +207,13 @@ struct InteractionQueryTests {
     private let idA = UUID()
     private let idB = UUID()
 
-    /// idA compact @ (0,0), idB compact @ (2,0) — edge-adjacent, valid.
-    private func twoCompacts(_ defaults: UserDefaults) -> DashboardLayoutStore {
+    /// idA compact @ (0,0) [rows 0..2], idB compact @ (0,2) [rows 2..4] — same
+    /// column, edge-adjacent, valid.
+    private func stackedCompacts(_ defaults: UserDefaults) -> DashboardLayoutStore {
         DashboardLayoutStore(
             seed: layout([
                 widget(.compact, at: GridPoint(column: 0, row: 0), id: idA),
-                widget(.compact, at: GridPoint(column: 2, row: 0), id: idB),
+                widget(.compact, at: GridPoint(column: 0, row: 2), id: idB),
             ]),
             defaults: defaults
         )
@@ -216,14 +221,15 @@ struct InteractionQueryTests {
 
     @Test("canMovePlacement: true for a free cell, the current cell, and false for overlap / bounds")
     func canMove() {
-        let s = twoCompacts(ephemeralDefaults())
+        let s = stackedCompacts(ephemeralDefaults())
         let before = signature(s.layout)
 
-        #expect(s.canMovePlacement(id: idA, to: GridPoint(column: 4, row: 0)) == true)   // free
+        #expect(s.canMovePlacement(id: idA, to: GridPoint(column: 1, row: 0)) == true)   // free (other column)
         #expect(s.canMovePlacement(id: idA, to: GridPoint(column: 0, row: 0)) == true)   // unchanged
-        #expect(s.canMovePlacement(id: idA, to: GridPoint(column: 2, row: 0)) == false)  // onto idB
-        #expect(s.canMovePlacement(id: idA, to: GridPoint(column: 5, row: 0)) == false)  // cols 5..7 > 6
-        #expect(s.canMovePlacement(id: UUID(), to: GridPoint(column: 4, row: 2)) == false) // unknown id
+        #expect(s.canMovePlacement(id: idA, to: GridPoint(column: 0, row: 2)) == false)  // onto idB
+        #expect(s.canMovePlacement(id: idA, to: GridPoint(column: 0, row: 5)) == false)  // rows 5..7 > 6
+        #expect(s.canMovePlacement(id: idA, to: GridPoint(column: 2, row: 0)) == false)  // column 2 off grid
+        #expect(s.canMovePlacement(id: UUID(), to: GridPoint(column: 1, row: 0)) == false) // unknown id
 
         #expect(signature(s.layout) == before)   // pure query — nothing changed
     }
@@ -231,11 +237,11 @@ struct InteractionQueryTests {
     @Test("canResizePlacement: bounds + overlap, without mutating")
     func canResize() {
         let defaults = ephemeralDefaults()
-        let s = twoCompacts(defaults)
+        let s = stackedCompacts(defaults)
         let before = signature(s.layout)
 
-        #expect(s.canResizePlacement(id: idA, to: .medium) == false)  // medium (3 wide) collides with idB
-        #expect(s.canResizePlacement(id: idB, to: .large) == false)   // large starts at col 2 → off grid
+        #expect(s.canResizePlacement(id: idA, to: .medium) == false)  // rows 0..3 collides with idB (rows 2..4)
+        #expect(s.canResizePlacement(id: idB, to: .large) == false)   // 1×6 from row 2 → off grid
         #expect(s.canResizePlacement(id: idA, to: .compact) == true)  // no change
 
         // A solo compact can grow to large.
@@ -262,7 +268,7 @@ struct DragCommitPersistenceTests {
     private func seed() -> DashboardLayout {
         layout([
             widget(.compact, at: GridPoint(column: 0, row: 0), id: idA),
-            widget(.compact, at: GridPoint(column: 2, row: 0), id: idB),
+            widget(.compact, at: GridPoint(column: 0, row: 2), id: idB),
         ], pageID: pageID)
     }
 
@@ -272,10 +278,11 @@ struct DragCommitPersistenceTests {
         let store = DashboardLayoutStore(seed: seed(), defaults: defaults)
 
         // What `handleMove` does: snap the dragged point, verify, then commit.
-        let geo = DashboardGridGeometry(grid: .standard, canvas: CGSize(width: 600, height: 400), gap: 0)
-        let start = geo.frame(origin: GridPoint(column: 0, row: 0), span: GridSpan(columns: 2, rows: 1))
-        let dropPoint = CGPoint(x: start.minX + 400, y: start.minY + 300) // drag down-right
-        let snapped = geo.snappedOrigin(pixelTopLeft: dropPoint, span: GridSpan(columns: 2, rows: 1))
+        let geo = DashboardGridGeometry(grid: .standard, canvas: CGSize(width: 600, height: 600), gap: 0)
+        let span = GridSpan(columns: 1, rows: 2)
+        let start = geo.frame(origin: GridPoint(column: 0, row: 0), span: span)
+        let dropPoint = CGPoint(x: start.minX + geo.step.width, y: start.minY) // drag one column right
+        let snapped = geo.snappedOrigin(pixelTopLeft: dropPoint, span: span)
 
         #expect(store.canMovePlacement(id: idA, to: snapped))
         #expect(store.movePlacement(id: idA, to: snapped) == true)
@@ -293,7 +300,7 @@ struct DragCommitPersistenceTests {
 
         // Proposed drop lands on idB → invalid, so `handleMove` keeps lastValid
         // (the start) and commits nothing.
-        let onTopOfB = GridPoint(column: 2, row: 0)
+        let onTopOfB = GridPoint(column: 0, row: 2)
         #expect(store.canMovePlacement(id: idA, to: onTopOfB) == false)
         // commit is skipped because lastValidOrigin == startOrigin
         #expect(signature(store.layout) == before)

@@ -33,7 +33,6 @@ struct SpacePagerView: View {
 
     private let registry: FeatureRegistry
     private let grid: DashboardGrid
-    private let comingSoon: [HomeComingSoonApp]
 
     /// The pager's current space index. `0` = Dashboard, `1…` = Home page `0…`.
     /// Seeded from the shell surface, kept synced both ways. Never persisted.
@@ -45,8 +44,7 @@ struct SpacePagerView: View {
         dashboardLayout: DashboardLayoutStore,
         dashboardEdit: DashboardEditModel,
         registry: FeatureRegistry,
-        grid: DashboardGrid,
-        comingSoon: [HomeComingSoonApp] = []
+        grid: DashboardGrid
     ) {
         _shell = ObservedObject(wrappedValue: shell)
         _homeLayout = ObservedObject(wrappedValue: homeLayout)
@@ -54,7 +52,6 @@ struct SpacePagerView: View {
         _dashboardEdit = ObservedObject(wrappedValue: dashboardEdit)
         self.registry = registry
         self.grid = grid
-        self.comingSoon = comingSoon
 
         let pageCount = max(1, homeLayout.layout.pageCount)
         _spaceIndex = State(initialValue: shell.surface.spaceIndex(homePageCount: pageCount) ?? 0)
@@ -97,7 +94,6 @@ struct SpacePagerView: View {
                     HomeSpaceView(
                         page: entry.element,
                         registry: registry,
-                        comingSoon: entry.offset == homePages.count - 1 ? comingSoon : [],
                         onOpenFeature: { shell.openApp($0) }
                     )
                     .tag(entry.offset + 1)
@@ -113,7 +109,6 @@ struct SpacePagerView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.dashBackground)
         .onChange(of: spaceIndex) { _, newValue in
             applyToShell(newValue)
         }

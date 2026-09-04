@@ -23,7 +23,8 @@ final class DashboardLayoutStore: ObservableObject {
 
     /// Namespaced key. A breaking schema change bumps the `.vN` suffix (old data
     /// is then simply ignored); the envelope `version` guards the current line.
-    static let storageKey = "shell.dashboardLayout.v1"
+    /// `.v2` — the M5.5.2a two-column grid; `.v1` layouts (6 × 4) are abandoned.
+    static let storageKey = "shell.dashboardLayout.v2"
 
     /// Current envelope schema version.
     static let schemaVersion = 1

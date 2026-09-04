@@ -83,6 +83,12 @@ struct DashThemeContrastTests {
         #expect(contrast(.dashDanger, .dashBackground) >= 3.0)
     }
 
+    @Test("the positive/connected status colour reads against the rail surface")
+    func positiveStatus() {
+        #expect(contrast(.dashPositive, .dashSurface) >= 3.0)
+        #expect(contrast(.dashPositive, .dashCard) >= 3.0)
+    }
+
     @Test("the surface ramp is layered — background < surface < card")
     func surfaceRamp() {
         #expect(contrast(.dashSurface, .dashBackground) > 1.05)

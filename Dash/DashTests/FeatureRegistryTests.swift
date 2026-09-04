@@ -82,7 +82,7 @@ struct FeatureRegistryTests {
 
         let map = registry.feature(MapFeature.id)
         #expect(map != nil)
-        #expect(map?.manifest.title == "Maps")
+        #expect(map?.manifest.title == "Google Maps")
         #expect(map?.manifest.supportedSizes.contains(.full) == true)
     }
 }

@@ -55,6 +55,38 @@ nonisolated enum MapComponentPresenter {
     }
 }
 
+/// Which fields a compact navigating Map widget shows at a given width. Pure so
+/// the "smallest component prioritises the next maneuver, adds secondary info
+/// only when it fits, and never looks like two pieces at opposite edges"
+/// contract (M5.5.2b §8 / §9) is unit-tested.
+///
+/// Priority order, most-sacrificable last:
+///   1. maneuver icon + turn distance  (always)
+///   2. the turn instruction line
+///   3. time-remaining + ETA
+///   4. remaining trip distance alongside 3
+nonisolated enum MapCompactManeuverLayout {
+
+    struct Fields: Equatable, Sendable {
+        var showInstruction: Bool
+        var showTimeAndETA: Bool
+        var showRemainingDistance: Bool
+    }
+
+    static func fields(availableWidth width: CGFloat) -> Fields {
+        switch width {
+        case ..<170:
+            return Fields(showInstruction: false, showTimeAndETA: false, showRemainingDistance: false)
+        case ..<250:
+            return Fields(showInstruction: true, showTimeAndETA: false, showRemainingDistance: false)
+        case ..<340:
+            return Fields(showInstruction: true, showTimeAndETA: true, showRemainingDistance: false)
+        default:
+            return Fields(showInstruction: true, showTimeAndETA: true, showRemainingDistance: true)
+        }
+    }
+}
+
 // MARK: - Entry
 
 struct MapComponentView: View {
@@ -189,7 +221,6 @@ struct MapCompactComponent: View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .padding(14)
-            .background(Color(white: 0.11))
             .mapDashboardObserving(feature)
     }
 
@@ -198,7 +229,7 @@ struct MapCompactComponent: View {
         switch presentation {
         case .maneuverGlance:
             if let card = navigationViewModel.maneuverCard {
-                CompactManeuver(card: card, remainingETA: navigationViewModel.routeInfo()?.etaText)
+                CompactManeuver(card: card, routeInfo: navigationViewModel.routeInfo())
             } else {
                 CompactIdle()
             }
@@ -263,44 +294,72 @@ struct ManeuverGlanceView: View {
     }
 }
 
+/// The smallest navigating Map widget. One cohesive left-aligned block —
+/// maneuver icon + turn distance always, then the instruction, then a secondary
+/// "time · ETA · distance" line — each added only when the width allows
+/// (`MapCompactManeuverLayout`). Never a turn-info-vs-ETA split with a gap
+/// between them.
 private struct CompactManeuver: View {
 
     let card: ManeuverCard
-    let remainingETA: String?
+    let routeInfo: RouteInfo?
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: card.iconSystemName)
-                .font(.system(size: 26, weight: .bold))
-                .foregroundStyle(.white)
-                .accessibilityHidden(true)
+        GeometryReader { proxy in
+            let fields = MapCompactManeuverLayout.fields(availableWidth: proxy.size.width)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(card.distanceText ?? card.primaryText)
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .monospacedDigit()
+            HStack(spacing: 12) {
+                Image(systemName: card.iconSystemName)
+                    .font(.system(size: 26, weight: .bold))
                     .foregroundStyle(.white)
-                Text(card.detailText ?? card.primaryText)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .lineLimit(1)
-            }
+                    .accessibilityHidden(true)
 
-            Spacer(minLength: 4)
-
-            if let remainingETA {
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(remainingETA)
-                        .font(.footnote.weight(.semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(card.distanceText ?? card.primaryText)
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
                         .monospacedDigit()
-                    Text("ETA")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+
+                    if fields.showInstruction {
+                        Text(card.primaryText)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
+                    }
+
+                    if fields.showTimeAndETA, let secondary = secondaryText(fields) {
+                        Text(secondary)
+                            .font(.system(size: 11, weight: .semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(1)
+                    }
                 }
-                .foregroundStyle(.white)
+
+                Spacer(minLength: 0)
             }
+            .frame(maxHeight: .infinity, alignment: .center)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(accessibilityLabel)
         }
-        .accessibilityElement(children: .combine)
+    }
+
+    /// "18 min · 14:22 · 12 km" — trimmed to what `fields` allows.
+    private func secondaryText(_ fields: MapCompactManeuverLayout.Fields) -> String? {
+        guard let info = routeInfo else { return nil }
+        var parts = [info.durationText, info.etaText]
+        if fields.showRemainingDistance { parts.append(info.distanceText) }
+        return parts.joined(separator: " · ")
+    }
+
+    private var accessibilityLabel: String {
+        var parts = [card.distanceText, card.primaryText].compactMap { $0 }
+        if let info = routeInfo {
+            parts.append("\(info.durationText) remaining")
+            parts.append("arriving \(info.etaText)")
+        }
+        return parts.joined(separator: ", ")
     }
 }
 
@@ -335,9 +394,10 @@ private struct CompactIdle: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.9))
             VStack(alignment: .leading, spacing: 1) {
-                Text("Maps")
+                Text("Google Maps")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
                 Text("No destination")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.6))

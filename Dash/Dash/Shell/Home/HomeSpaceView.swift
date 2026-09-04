@@ -2,19 +2,20 @@
 //  HomeSpaceView.swift
 //  Dash
 //
-//  One page of the App-Home launcher. Renders the icons for a single `HomePage`,
-//  resolving each placement's `featureID` through `FeatureRegistry` for the icon
-//  + title, and — when an icon is tapped — forwards the `featureID` up through
-//  `onOpenFeature` (wired to `ShellStore.openApp` by `DashboardShell`, the same
-//  boundary `DashboardSpaceView` uses).
+//  One page of the App-Home launcher — an automotive app grid, not an iPad
+//  `LazyVGrid` of cards. Large colourful `DashAppIcon`s with the app name on a
+//  dark pill beneath, filling the canvas left-to-right then top-to-bottom.
 //
-//  This view is NOT a pager. Horizontal navigation between the Dashboard and the
-//  Home pages is one shell-level model (`SpacePagerView`); this view is just the
-//  content of a single Home space. Icons start at the TOP-LEFT of the usable
-//  area and fill left-to-right, then top-to-bottom — no centring.
+//  It resolves each placement's `featureID` through `FeatureRegistry` for the
+//  icon identity and — when an icon is tapped — forwards the `featureID` up
+//  through `onOpenFeature` (wired to `ShellStore.openApp` by `DashboardShell`).
 //
-//  Feature-agnostic: it knows only `HomePage` / `HomeAppPlacement` / `FeatureID`
-//  / `FeatureManifest` and the open callback. No `ShellStore`, no view models.
+//  Not a pager. Horizontal navigation between the Dashboard and the Home pages
+//  is one shell-level model (`SpacePagerView`); this view is just the content of
+//  a single Home space and draws no ground (it sits on `DashShellBackground`).
+//
+//  Feature-agnostic: knows only `HomePage` / `HomeAppPlacement` / `FeatureID` /
+//  `FeatureManifest` and the open callback.
 //
 
 import SwiftUI
@@ -29,20 +30,13 @@ struct HomeSpaceView: View {
     /// Ask the shell to open a feature full-screen (an icon was tapped).
     private let onOpenFeature: (FeatureID) -> Void
 
-    /// Presentation-only "coming soon" icons — **not** registered features and
-    /// **not** persisted. Supplied by `DashboardShell`; only shown on the last
-    /// Home page.
-    private let comingSoon: [HomeComingSoonApp]
-
     init(
         page: HomePage,
         registry: FeatureRegistry,
-        comingSoon: [HomeComingSoonApp] = [],
         onOpenFeature: @escaping (FeatureID) -> Void
     ) {
         self.page = page
         self.registry = registry
-        self.comingSoon = comingSoon
         self.onOpenFeature = onOpenFeature
     }
 
@@ -53,16 +47,9 @@ struct HomeSpaceView: View {
 
     // MARK: - Body
 
-    /// Fixed-width icon columns — `HomeGrid.columns` of them — so icons flow
-    /// left-to-right and wrap to a new row. Not adaptive/centred: the collection
-    /// is anchored to the top-left of the usable area.
     private var columns: [GridItem] {
         Array(
-            repeating: GridItem(
-                .fixed(HomeMetrics.slotWidth),
-                spacing: HomeMetrics.columnSpacing,
-                alignment: .top
-            ),
+            repeating: GridItem(.flexible(), spacing: HomeMetrics.columnSpacing, alignment: .top),
             count: max(1, HomeGrid.columns)
         )
     }
@@ -71,131 +58,98 @@ struct HomeSpaceView: View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVGrid(columns: columns, alignment: .leading, spacing: HomeMetrics.rowSpacing) {
                 ForEach(page.apps) { placement in
-                    HomeAppTileButton(
+                    HomeAppTile(
                         manifest: registry.feature(placement.featureID)?.manifest,
                         featureID: placement.featureID,
                         onOpen: onOpenFeature
                     )
                 }
-                ForEach(comingSoon) { app in
-                    HomeAppIcon(symbol: app.symbolName, title: app.title, dimmed: true)
-                }
             }
-            .padding(.top, HomeMetrics.topPadding)
-            .padding(.leading, HomeMetrics.leadingPadding)
-            .padding(.trailing, HomeMetrics.leadingPadding)
-            .padding(.bottom, HomeMetrics.bottomPadding)
+            .padding(.horizontal, HomeMetrics.edgeInset)
+            .padding(.top, HomeMetrics.topInset)
+            .padding(.bottom, HomeMetrics.bottomInset)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.dashBackground)
     }
 }
 
 // MARK: - Metrics
 
 private enum HomeMetrics {
-    static let iconSize: CGFloat = 84
-    static let iconCorner: CGFloat = 20
-    static let glyphSize: CGFloat = 38
-    static let labelSpacing: CGFloat = 10
-    /// One icon + its label, with breathing room — the grid's fixed cell width.
-    static let slotWidth: CGFloat = 128
-    static let columnSpacing: CGFloat = 28
-    static let rowSpacing: CGFloat = 34
-    /// Sensible automotive inset from the top / left edges of the usable area.
-    static let topPadding: CGFloat = 40
-    static let leadingPadding: CGFloat = 44
-    static let bottomPadding: CGFloat = 40
+    static let iconSize: CGFloat = 108
+    static let labelSpacing: CGFloat = 12
+    static let columnSpacing: CGFloat = 30
+    static let rowSpacing: CGFloat = 40
+    static let edgeInset: CGFloat = 44
+    static let topInset: CGFloat = 44
+    static let bottomInset: CGFloat = 44
 }
 
-// MARK: - App icon
+// MARK: - Tiles
 
-/// A tappable Home app icon. Tapping forwards `featureID` — it knows nothing
-/// about which feature that is or how it opens.
-struct HomeAppTileButton: View {
+/// A tappable Home app tile. Forwards `featureID` — it knows nothing about which
+/// feature that is or how it opens.
+struct HomeAppTile: View {
 
     let manifest: FeatureManifest?
     let featureID: FeatureID
     let onOpen: (FeatureID) -> Void
 
-    /// The tap action — the icon's whole job. Exposed for tests.
+    /// The tap action — exposed for tests.
     func activate() { onOpen(featureID) }
 
     private var title: String { manifest?.title ?? featureID }
-    private var symbol: String { manifest?.symbolName ?? "questionmark.app.dashed" }
 
     var body: some View {
         Button(action: activate) {
-            HomeAppIcon(symbol: symbol, title: title)
+            VStack(spacing: HomeMetrics.labelSpacing) {
+                icon
+                HomeAppLabel(text: title)
+            }
         }
-        .buttonStyle(HomeIconButtonStyle())
+        .buttonStyle(.dashPress)
         .accessibilityLabel(title)
         .accessibilityHint("Opens \(title)")
         .accessibilityAddTraits(.isButton)
     }
-}
 
-/// The icon's visuals — a rounded-square glyph container with the title beneath.
-/// Dumb and feature-agnostic; reused for real and "coming soon" icons.
-struct HomeAppIcon: View {
-
-    let symbol: String
-    let title: String
-    var dimmed: Bool = false
-
-    var body: some View {
-        VStack(spacing: HomeMetrics.labelSpacing) {
-            RoundedRectangle(cornerRadius: HomeMetrics.iconCorner, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [Color(white: 0.26), Color(white: 0.14)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: HomeMetrics.iconCorner, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-                )
-                .overlay(
-                    Image(systemName: symbol)
-                        .font(.system(size: HomeMetrics.glyphSize, weight: .semibold))
-                        .foregroundStyle(.white)
-                )
-                .frame(width: HomeMetrics.iconSize, height: HomeMetrics.iconSize)
-                .shadow(color: .black.opacity(0.45), radius: 9, y: 5)
-
-            Text(title)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .frame(maxWidth: HomeMetrics.iconSize + 28)
-
-            if dimmed {
-                Text("Soon")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
+    @ViewBuilder
+    private var icon: some View {
+        if let manifest {
+            DashAppIcon(manifest: manifest, size: HomeMetrics.iconSize)
+        } else {
+            DashAppIcon(symbolName: "questionmark.app.dashed", tint: .graphite, size: HomeMetrics.iconSize)
         }
-        .opacity(dimmed ? 0.5 : 1)
     }
 }
 
-/// The pressed state — a deliberate spring scale-down on the whole icon + label.
-private struct HomeIconButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.9 : 1)
-            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: configuration.isPressed)
+/// The app name on a dark rounded pill, CarPlay-style — compact, translucent,
+/// readable. Not a bordered SwiftUI button.
+private struct HomeAppLabel: View {
+
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.dashTextPrimary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(.ultraThinMaterial))
+            .overlay(Capsule().fill(Color.black.opacity(0.22)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: DashMetrics.hairline))
+            .clipShape(Capsule())
     }
 }
 
 // MARK: - Page dots
 
 /// CarPlay-style page indicators — one small dot per **Home page** (never the
-/// Dashboard), current highlighted, each a large-hit-target button that selects
-/// its page. Owned here but positioned by `SpacePagerView`.
+/// Dashboard), current highlighted, each a large-hit-target button. Positioned
+/// by `SpacePagerView`.
 struct HomePageDots: View {
 
     let count: Int
@@ -224,17 +178,11 @@ struct HomePageDots: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Color.dashSurface.opacity(0.92), in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.dashSeparator, lineWidth: DashMetrics.hairline))
+        .background {
+            Capsule().fill(.ultraThinMaterial).overlay(Capsule().fill(Color.dashPanelTint))
+        }
+        .clipShape(Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: DashMetrics.hairline))
         .animation(.easeInOut(duration: 0.2), value: current)
     }
-}
-
-// MARK: - Coming-soon (presentation only)
-
-/// A presentation-only icon for an app that isn't built yet.
-struct HomeComingSoonApp: Identifiable, Equatable, Sendable {
-    let id = UUID()
-    let title: String
-    let symbolName: String
 }

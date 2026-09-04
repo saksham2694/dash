@@ -9,6 +9,17 @@
 //  size + origin per widget; the shell decides the footprint. SDK-neutral — cell
 //  counts, never points or SwiftUI types — so it is trivially unit-testable.
 //
+//  M5.5.2a: the dashboard is a **two-column** canvas (a wide left surface + a
+//  supporting right stack), six rows tall, so the CarPlay-style compositions
+//  compose cleanly and always fill the canvas:
+//
+//      large   = 1 × 6  (a full-height column)
+//      medium  = 1 × 3  (two stack in a column)
+//      compact = 1 × 2  (three stack in a column)
+//
+//  So "large + 2 medium" and "large + 3 compact" are exact tilings; there is no
+//  arrangement that leaves a half-width void.
+//
 
 import Foundation
 
@@ -59,22 +70,24 @@ nonisolated struct DashboardGrid: Equatable, Sendable {
     var columns: Int
     var rows: Int
 
-    /// Landscape-iPad friendly. The single grid Dash ships with.
-    static let standard = DashboardGrid(columns: 6, rows: 4)
+    /// The two-column, six-row canvas Dash ships with (see the file header).
+    static let standard = DashboardGrid(columns: 2, rows: 6)
 
     init(columns: Int, rows: Int) {
         self.columns = columns
         self.rows = rows
     }
 
-    /// Cells a widget of `size` occupies. `.full` is not a dashboard widget — it
-    /// maps to the whole grid so any layout that places it is caught by
-    /// validation (`DashboardLayoutValidator` also rejects it outright).
+    /// Cells a widget of `size` occupies. Widgets are always **one column wide**;
+    /// the size chooses the height (`compact` a third, `medium` a half, `large`
+    /// the whole column). `.full` is not a dashboard widget — it maps to the
+    /// whole grid so any layout that places it is caught by validation
+    /// (`DashboardLayoutValidator` also rejects it outright).
     func span(for size: ComponentSize) -> GridSpan {
         switch size {
-        case .compact: return GridSpan(columns: 2, rows: 1)
-        case .medium:  return GridSpan(columns: 3, rows: 2)
-        case .large:   return GridSpan(columns: columns, rows: 2)
+        case .compact: return GridSpan(columns: 1, rows: max(1, rows / 3))
+        case .medium:  return GridSpan(columns: 1, rows: max(1, rows / 2))
+        case .large:   return GridSpan(columns: 1, rows: rows)
         case .full:    return GridSpan(columns: columns, rows: rows)
         }
     }

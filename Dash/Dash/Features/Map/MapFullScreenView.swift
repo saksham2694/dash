@@ -88,6 +88,11 @@ struct MapFullScreenView: View {
             .ignoresSafeArea()
             .overlay(alignment: .top) { topOverlay }
             .overlay(alignment: .bottom) { bottomOverlay }
+            // The search field lives in `topOverlay`. Keep the map screen and its
+            // overlays out of keyboard safe-area avoidance so focusing search
+            // never nudges this view (the shell above also opts out).
+            .ignoresSafeArea(.keyboard)
+            .logsKeyboardGeometry("map-screen")
             .animation(.easeInOut(duration: 0.2), value: mapViewModel.canStartNavigation)
             .animation(.easeInOut(duration: 0.2), value: isNavigating)
             .animation(.easeInOut(duration: 0.2), value: mapViewModel.route)
