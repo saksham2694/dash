@@ -23,14 +23,21 @@ struct SpeedometerComponentView: View {
     let size: ComponentSize
 
     var body: some View {
-        switch size {
-        case .compact:
-            SpeedometerCompactView(viewModel: viewModel)
-        case .medium, .large, .full:
-            // `.large` / `.full` should not reach a *component* view (large is
-            // unsupported; full goes through `makeFullScreenView`), but keep this
-            // total — the same standard gauge is a safe rendering at any size.
-            SpeedometerGaugeView(viewModel: viewModel, style: .standard)
+        Group {
+            switch size {
+            case .compact:
+                SpeedometerCompactView(viewModel: viewModel)
+            case .medium, .large, .full:
+                // `.large` / `.full` should not reach a *component* view (large is
+                // unsupported; full goes through `makeFullScreenView`), but keep this
+                // total — the same standard gauge is a safe rendering at any size.
+                SpeedometerGaugeView(viewModel: viewModel, style: .standard)
+            }
         }
+        // The dashboard-widget ground (M9.0 UI pass — dashboard widget
+        // backgrounds): translucent, not flat black, so the shell's own
+        // glass panel behind this widget shows through. `SpeedometerView`
+        // (full-screen) keeps its own opaque black ground separately.
+        .background(SpeedometerPalette.widgetSurface)
     }
 }

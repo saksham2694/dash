@@ -8,5 +8,18 @@
 	<array>
 		<string>_dashrelay._tcp</string>
 	</array>
+	<!-- M9.0 — Apple Music. Required by MusicAuthorization.request(); shown
+	     once, the first time the Music feature asks for access. -->
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Dash uses your Apple Music account to search the catalog, play songs, and show your library while you drive.</string>
+	<!-- M9.0 — lets ApplicationMusicPlayer keep playing when Dash is
+	     backgrounded (e.g. the driver switches to Maps full-screen, or the
+	     iPad's screen locks). This is a plain Info.plist declaration — no
+	     entitlement or Developer Portal action needed, unlike the MusicKit
+	     capability itself (see PROJECT_STATUS.md / the M9.0 report). -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 </dict>
 </plist>

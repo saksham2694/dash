@@ -68,7 +68,7 @@ extension FeatureRegistry {
         FeatureRegistry([
             MapFeature(),                    // "Google Maps" — the real map feature
             PlaceholderFeature.appleMaps(),
-            PlaceholderFeature.music(),      // "Apple Music"
+            AppleMusicFeature(),             // real MusicKit-backed Apple Music (M9.0)
             WeatherFeature(),                // real WeatherKit weather widget (M8.4)
             SpeedometerFeature(),            // real speed readout (M8.0)
             SettingsFeature(),               // real Apple-style Settings (M8.3)

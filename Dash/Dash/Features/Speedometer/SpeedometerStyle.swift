@@ -16,8 +16,19 @@
 import SwiftUI
 
 enum SpeedometerPalette {
-    /// The cluster ground. Stays black regardless of Dash's wallpaper.
+    /// The cluster ground. Stays black regardless of Dash's wallpaper — the
+    /// full-screen instrument only (`SpeedometerView`); NOT the dashboard
+    /// widget surface, which uses `widgetSurface` instead so the shell's own
+    /// glass panel behind it can show through (M9.0 UI pass — dashboard
+    /// widget backgrounds).
     static let background = Color.black
+    /// The dashboard-widget ground (compact/medium `SpeedometerComponentView`)
+    /// — translucent rather than flat black, so it reads as a dark glass
+    /// surface over the shell's own panel (`WidgetHostView.dashGlassSurface`)
+    /// instead of a flat black rectangle, while still giving the white
+    /// numerals/red accent enough contrast. Feature-owned (no `DashTheme`
+    /// import), so a plain translucent black rather than the shell's exact tint.
+    static let widgetSurface = Color.black.opacity(0.42)
     /// Sporty red — the outer ring, alternating ticks, needle, hub accent.
     static let accent = Color(red: 0.94, green: 0.10, blue: 0.14)
     static let accentDim = Color(red: 0.50, green: 0.11, blue: 0.13)

@@ -2,15 +2,16 @@
 //  PlaceholderFeature.swift
 //  Dash
 //
-//  Registered-but-not-yet-implemented features. Apple Maps and Apple Music are
-//  real Dash features — they belong in the sidebar and the Home launcher with
-//  their own identity now, not as dimmed "coming soon" stand-ins. Their
-//  runtime isn't built yet, so opening one full-screen shows a short "not set
-//  up yet" panel. They advertise no widget sizes, so the dashboard widget
-//  picker simply doesn't offer them until they ship. (Speedometer became a
-//  real feature in M8.0 — see `SpeedometerFeature`; Settings became a real
+//  Registered-but-not-yet-implemented features. Apple Maps is a real Dash
+//  feature — it belongs in the sidebar and the Home launcher with its own
+//  identity now, not as a dimmed "coming soon" stand-in. Its runtime isn't
+//  built yet, so opening it full-screen shows a short "not set up yet"
+//  panel. It advertises no widget sizes, so the dashboard widget picker
+//  simply doesn't offer it until it ships. (Speedometer became a real
+//  feature in M8.0 — see `SpeedometerFeature`; Settings became a real
 //  feature in M8.3 — see `SettingsFeature`; Weather became a real feature in
-//  M8.4 — see `WeatherFeature`.)
+//  M8.4 — see `WeatherFeature`; Apple Music became a real feature in M9.0 —
+//  see `AppleMusicFeature`.)
 //
 //  When a feature is implemented for real it gets its own file and drops out
 //  of here — the **id** and manifest identity carry over unchanged, so
@@ -63,7 +64,6 @@ extension PlaceholderFeature {
     /// Stable feature ids. A future real feature reuses its id verbatim.
     enum ID {
         static let appleMaps = "apple-maps"
-        static let music = "music"
     }
 
     static func appleMaps() -> PlaceholderFeature {
@@ -74,17 +74,6 @@ extension PlaceholderFeature {
             tint: .blue,
             iconAssetName: "app-icon-apple-maps",
             blurb: "An Apple Maps view will join Google Maps as a map provider."
-        )
-    }
-
-    static func music() -> PlaceholderFeature {
-        PlaceholderFeature(
-            id: ID.music,
-            title: "Apple Music",
-            symbolName: "music.note",
-            tint: .pink,
-            iconAssetName: "app-icon-apple-music",
-            blurb: "Full Apple Music catalog search and a custom player are on the way."
         )
     }
 

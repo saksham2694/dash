@@ -16,6 +16,17 @@
 //  readout's unit (M8.3) is a separate, purely textual concern — see
 //  `SpeedometerPresentation`.
 //
+//  M9.0 UI pass — medium/full centering fix: the ring was previously centred
+//  at the box's raw midpoint (`proxy.size.height / 2`) with the digital
+//  readout hanging below it — since the readout's own height is much smaller
+//  than the ring's top half, that left too little breathing room above the
+//  ring and too much unused space below the (comparatively short) readout.
+//  `centreY(forBoxHeight:radius:style:)` below centres the ring **and** the
+//  readout as one combined block instead — pulled out as a pure, unit-tested
+//  function (`estimatedReadoutHeight` sizes the readout from the same
+//  font-fraction constants `centralReadout` itself draws with, not an
+//  arbitrary constant).
+//
 
 import SwiftUI
 
@@ -33,7 +44,8 @@ struct SpeedometerDial: View {
         GeometryReader { proxy in
             let side = min(proxy.size.width, proxy.size.height)
             let radius = side / 2
-            let centre = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            let centreY = Self.centreY(forBoxHeight: proxy.size.height, radius: radius, style: style)
+            let centre = CGPoint(x: proxy.size.width / 2, y: centreY)
 
             ZStack(alignment: .top) {
                 Canvas { context, _ in
@@ -45,7 +57,7 @@ struct SpeedometerDial: View {
                 // metrics — it starts a fixed distance below centre and grows
                 // downward from there.
                 VStack(spacing: 0) {
-                    Color.clear.frame(height: max(0, proxy.size.height / 2 + radius * style.readoutTopInsetFraction))
+                    Color.clear.frame(height: max(0, centreY + radius * style.readoutTopInsetFraction))
                     centralReadout(radius: radius)
                     Spacer(minLength: 0)
                 }
@@ -208,6 +220,30 @@ struct SpeedometerDial: View {
         .frame(maxWidth: .infinity)
     }
 
+    // MARK: - Centering (M9.0 UI pass — "centre the gauge as a whole")
+
+    /// The vertical centre to draw the ring/needle/hub around so the ring
+    /// **and** the readout below it are centred as one combined block within
+    /// a box of `forBoxHeight` — see this file's header. Pure / static so
+    /// it's unit-testable without a real view.
+    static func centreY(forBoxHeight height: CGFloat, radius: CGFloat, style: SpeedometerGaugeStyle) -> CGFloat {
+        let readoutHeight = estimatedReadoutHeight(radius: radius, style: style)
+        let topHalf = radius
+        let bottomHalf = radius * style.readoutTopInsetFraction + readoutHeight
+        return height / 2 + (topHalf - bottomHalf) / 2
+    }
+
+    /// A layout-time estimate of the readout's rendered height (number line +
+    /// unit line + the `VStack` spacing between them), from the exact same
+    /// font-fraction constants `centralReadout` draws with — not an arbitrary
+    /// constant. `1.15` is a standard line-height-over-point-size allowance.
+    static func estimatedReadoutHeight(radius: CGFloat, style: SpeedometerGaugeStyle) -> CGFloat {
+        let numberLine = radius * style.numberFontFraction * 1.15
+        let unitLine = radius * style.unitFontFraction * 1.15
+        let spacing = radius * 0.02
+        return numberLine + unitLine + spacing
+    }
+
     private var accessibilityLabel: String {
         let unitName = presentation.unit.accessibilityName
         switch presentation.availability {
@@ -221,6 +257,12 @@ struct SpeedometerDial: View {
 /// The live full gauge — ticks the shared view model each frame. Full-screen
 /// and the medium widget both use this with the SAME `style`, just a different
 /// frame size, so they render the identical instrument at different scales.
+///
+/// Deliberately draws no background of its own (M9.0 UI pass — dashboard
+/// widget backgrounds): the full-screen instrument's black ground and the
+/// dashboard widget's translucent glass-showing surface are two different
+/// contexts, so each caller (`SpeedometerView` / `SpeedometerComponentView`)
+/// supplies its own.
 struct SpeedometerGaugeView: View {
 
     let viewModel: SpeedometerViewModel
@@ -230,12 +272,8 @@ struct SpeedometerGaugeView: View {
     @EnvironmentObject private var speedUnitStore: SpeedUnitStore
 
     var body: some View {
-        ZStack {
-            SpeedometerPalette.background
-
-            TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
-                SpeedometerDial(presentation: viewModel.tick(at: context.date), style: style)
-            }
+        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
+            SpeedometerDial(presentation: viewModel.tick(at: context.date), style: style)
         }
         .onAppear {
             viewModel.connect(to: locationStore)

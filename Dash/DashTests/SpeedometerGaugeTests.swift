@@ -9,6 +9,7 @@
 
 import CoreGraphics
 import Foundation
+import SwiftUI
 import Testing
 @testable import Dash
 
@@ -98,5 +99,85 @@ struct SpeedometerGaugeTests {
             SpeedometerGauge.point(degreesFromTop: 137, radius: 40, centre: centre).y - centre.y
         )
         #expect(abs(d - 40) < 1e-6)
+    }
+}
+
+// MARK: - Compact widget geometry (M9.0 UI pass — position/cropping fix)
+
+@Suite("SpeedometerCompactDial.arcGeometry")
+struct SpeedometerCompactArcGeometryTests {
+
+    /// The two aspect ratios the dashboard's unequal-width columns actually
+    /// produce (see `DashboardGridGeometry`'s weighted split) — a wide box
+    /// (left column, previously height-bound) and a narrow one (right
+    /// column, previously width-bound). Both must now leave real margin on
+    /// every side, not just whichever one used to happen to have slack.
+    @Test("a wide (left-column-shaped) box leaves real top margin", arguments: [
+        CGSize(width: 340, height: 150),
+        CGSize(width: 300, height: 130),
+    ])
+    func wideBoxLeavesTopMargin(size: CGSize) {
+        guard let (radius, centre) = SpeedometerCompactDial.arcGeometry(for: size, sweepDegrees: 150) else {
+            Issue.record("expected valid geometry for \(size)")
+            return
+        }
+        let apexY = centre.y - radius
+        #expect(apexY > 0.5, "apex should sit below the box's top edge, not touch it")
+    }
+
+    @Test("a narrow (right-column-shaped) box leaves real side margin", arguments: [
+        CGSize(width: 190, height: 150),
+        CGSize(width: 160, height: 140),
+    ])
+    func narrowBoxLeavesSideMargin(size: CGSize) {
+        guard let (radius, centre) = SpeedometerCompactDial.arcGeometry(for: size, sweepDegrees: 150) else {
+            Issue.record("expected valid geometry for \(size)")
+            return
+        }
+        let halfSweep = CGFloat(150.0 / 2) * .pi / 180
+        let endX = radius * sin(halfSweep)
+        #expect(centre.x - endX > 0.5, "the arc's left end should sit right of the box's left edge")
+        #expect(centre.x + endX < size.width - 0.5, "the arc's right end should sit left of the box's right edge")
+    }
+
+    @Test("degenerate sizes still return nil")
+    func degenerateStillNil() {
+        #expect(SpeedometerCompactDial.arcGeometry(for: .zero, sweepDegrees: 150) == nil)
+        #expect(SpeedometerCompactDial.arcGeometry(for: CGSize(width: 100, height: 100), sweepDegrees: 0) == nil)
+    }
+}
+
+// MARK: - Medium/full centering (M9.0 UI pass — "centre the gauge as a whole")
+
+@Suite("SpeedometerDial centering")
+struct SpeedometerDialCenteringTests {
+
+    private let style = SpeedometerGaugeStyle.standard
+
+    @Test("centring the ring+readout as a block shifts the centre below the box midpoint")
+    func shiftsBelowMidpoint() {
+        let height: CGFloat = 400
+        let radius: CGFloat = 150
+        let centreY = SpeedometerDial.centreY(forBoxHeight: height, radius: radius, style: style)
+        // The readout is always shorter than the ring's own top half, so the
+        // combined block's balance point sits below the box's raw midpoint —
+        // i.e. the ring moves down, adding top margin / trimming the bottom.
+        #expect(centreY > height / 2)
+    }
+
+    @Test("a taller box grows the same way — the offset from the midpoint is independent of box height")
+    func offsetIndependentOfHeight() {
+        let radius: CGFloat = 150
+        let centreY400 = SpeedometerDial.centreY(forBoxHeight: 400, radius: radius, style: style)
+        let centreY600 = SpeedometerDial.centreY(forBoxHeight: 600, radius: radius, style: style)
+        #expect(abs((centreY400 - 200) - (centreY600 - 300)) < 1e-9)
+    }
+
+    @Test("estimated readout height grows with radius and is well under the ring's own radius")
+    func readoutHeightIsReasonable() {
+        let radius: CGFloat = 150
+        let readoutHeight = SpeedometerDial.estimatedReadoutHeight(radius: radius, style: style)
+        #expect(readoutHeight > 0)
+        #expect(readoutHeight < radius, "the readout shouldn't be as tall as the ring itself")
     }
 }

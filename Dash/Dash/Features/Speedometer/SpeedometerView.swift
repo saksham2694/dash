@@ -20,6 +20,7 @@ struct SpeedometerView: View {
     var body: some View {
         SpeedometerGaugeView(viewModel: viewModel)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(SpeedometerPalette.background)
             .ignoresSafeArea()
     }
 }

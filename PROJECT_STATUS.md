@@ -3574,4 +3574,85 @@ subsets were run, per instruction) or exercised on a physical device —
 physical testing (including real custom-wallpaper import via Photos, and the
 Weather UI's on-device look) is still pending.
 
+## M9.0 — Apple Music
+
+Status: **Implemented and physically verified — PASS.** Full MusicKit-backed
+Apple Music feature, built self-contained under `Features/AppleMusic/`
+(protocol-wrapped service boundaries around every MusicKit-backed concern;
+`ApplicationMusicPlayer` used directly, per instruction, with no protocol),
+registered in `FeatureRegistry` in place of the retired music placeholder.
+Iterated across several rounds of interaction/layout fixes driven by physical-
+device testing; all of the following passed on the real iPad:
+
+- Authorization (`MusicAuthorization`) and subscription detection
+  (`MusicSubscription`, the native `.musicSubscriptionOffer` sheet) via
+  `MusicAccessViewModel`, gating the feature behind `MusicAccessGateView`.
+- Catalog search (`MusicCatalogSearchRequest`) — its own tab, not a toolbar
+  icon (a toolbar-icon attempt was tried and dropped after repeatedly failing
+  to appear physically).
+- Recently Played (`MusicRecentlyPlayedRequest`) — the first/default tab.
+- Library (songs/albums/artists/playlists, `MusicLibraryRequest` +
+  `.with(.tracks)` relationship loading) and Favorites (the `v1/me/ratings/
+  songs` REST escape hatch via `MusicDataRequest`, MusicKit's typed API having
+  no bidirectional favorite).
+- Playback, one shared `MusicPlayerViewModel` (`ApplicationMusicPlayer.shared`)
+  owned once by `AppleMusicFeature` and read by every surface — full player,
+  mini-player, and all three widget sizes — with no second player instance
+  anywhere.
+- Last-played/relaunch restoration (`MusicPlaybackRestoration`, best-effort
+  autoplay — a real `player.play()` attempt, never faked).
+- Duration/progress: `Song`/`Track.duration` preferred live off the queue
+  entry, falling back to a `knownDurations` cache captured at queue-time
+  (`ApplicationMusicPlayer.Queue.Entry.item`'s extended attributes, duration
+  included, are not reliably populated — this cache is the actual fix).
+- A persistent Apple-Music-style mini-player (anchored above the tab bar via
+  `.safeAreaInset`, shown whenever there's a current song) and a full-screen
+  Now Playing player (artwork, seeking, transport, real system volume via
+  `MPVolumeView`/`SystemVolumeSlider`), including swipe-down-to-dismiss
+  (`DragGesture` + `.simultaneousGesture`, alongside the existing chevron
+  button) that doesn't interfere with seeking/transport/volume.
+- Compact / medium / large dashboard widgets — all real (unlike Speedometer/
+  Weather, per instruction), each with its own directly-interactive transport
+  controls that never open the full feature.
+- Background audio (`UIBackgroundModes: ["audio"]`, `NSAppleMusicUsageDescription`).
+- The large widget's volume ended as a **display-only indicator**
+  (`SystemVolumeIndicator`, reading `AVAudioSession.outputVolume` via KVO) —
+  interactive volume there (a real `MPVolumeView` coexisting with
+  `WidgetHostView`'s tap-to-open `Button` and the dashboard pager) was
+  attempted across two rounds and abandoned once physical testing kept
+  finding the ancestor-gesture arbitration unreliable; the full-screen
+  player's real, interactive volume control is unaffected and still works.
+
+Tests / build: targeted `DashTests` subsets (Apple Music + Speedometer suites)
+run after every round in this milestone, always green; final Debug build
+clean each time. Full Dash/DashRelay/DashShared suite not run for M9.0 yet
+(per instruction — targeted only).
+
+Nothing committed for M9.0 yet.
+
+## Speedometer — M9.0 UI pass (geometry + widget surface)
+
+Status: **Physically verified — PASS**, alongside M9.0 Apple Music. Two
+geometry fixes and one surface fix, all in `Features/Speedometer/`, no
+`SpeedometerEngine`/design changes:
+
+- Compact widget clipping (ends cut off on the right/narrower dashboard
+  column, top slightly cut off on the left/wider one — the two columns are
+  genuinely different aspect ratios, see `DashboardGridGeometry`'s weighted
+  split): `SpeedometerCompactDial.arcGeometry` now solves its radius against
+  an inset usable box (margin on every side) instead of touching the box
+  edges exactly, one geometry for both placements.
+- Medium/full-screen centering (gauge felt too high, too much dead space
+  below): `SpeedometerDial` now centres the ring **and** the digital readout
+  below it as one combined block (`centreY`/`estimatedReadoutHeight`), not
+  just the ring alone.
+- Widget surface: compact/medium widgets no longer paint their own opaque
+  black ground — that's now `SpeedometerPalette.widgetSurface` (translucent),
+  applied once in `SpeedometerComponentView`, so the shell's own glass panel
+  behind the widget shows through; the full-screen instrument
+  (`SpeedometerView`) keeps its original opaque black ground, unchanged.
+
+Tests: new `SpeedometerCompactArcGeometryTests` / `SpeedometerDialCenteringTests`
+(pure geometry, both aspect ratios). Nothing committed.
+
 - Nothing committed.

@@ -128,13 +128,14 @@ struct FeatureIconIdentityTests {
     @Test("every not-yet-built feature advertises no dashboard widget size")
     func placeholdersHaveNoWidgets() {
         let registry = FeatureRegistry.makeDefault()
-        for id in ["apple-maps", "music", "settings"] {
+        for id in ["apple-maps", "settings"] {
             #expect(registry.feature(id)?.manifest.supportedWidgetSizes.isEmpty == true)
         }
         // …so the Add-Widget picker offers only the real widget features
-        // (Maps, Weather and Speedometer, in registry order — M8.4).
+        // (Maps, Apple Music, Weather and Speedometer, in registry order —
+        // M9.0).
         let placeable = DashboardWidgetPickerView.placeableFeatures(registry.manifests).map(\.id)
-        #expect(placeable == ["maps", "weather", "speedometer"])
+        #expect(placeable == ["maps", "music", "weather", "speedometer"])
     }
 
     @Test("the Speedometer supports compact + medium widgets and full-screen, but NOT large")

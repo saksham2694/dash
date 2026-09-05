@@ -14,6 +14,21 @@
 //  width and height constraints), so it fits cleanly at any compact aspect
 //  ratio instead of assuming one.
 //
+//  M9.0 UI pass — position/cropping fix: the dashboard's two columns are NOT
+//  equal width (`DashboardGridGeometry`'s weighted split — the left column is
+//  wider than the right), so the SAME compact widget gets a genuinely
+//  different aspect-ratio box depending on which column it's placed in. The
+//  original `arcGeometry` solved a radius that touched the box's edges with
+//  ZERO margin on whichever dimension was tightest — on the wider (left)
+//  column the box is width-generous, so the HEIGHT constraint bound instead,
+//  landing the apex exactly at `y = 0` (no top margin); on the narrower
+//  (right) column the WIDTH constraint bound instead, landing the arc's two
+//  ends exactly at the box's left/right edges (no side margin) — either one
+//  then gets clipped by the widget's own rounded-card mask. `arcGeometry` now
+//  solves the radius against an explicitly inset usable box (below), so
+//  there's always real margin on every side regardless of which constraint
+//  binds — one geometry, correct at any aspect ratio, no left/right cases.
+//
 
 import SwiftUI
 
@@ -114,17 +129,35 @@ struct SpeedometerCompactDial: View {
 
     /// Solve the largest circle radius (and its centre) whose `sweepDegrees`
     /// cap — ends at the bottom of `size`, apex at or above its top — fits
-    /// entirely inside `size`. `nil` for a degenerate size.
-    static func arcGeometry(for size: CGSize, sweepDegrees: Double) -> (radius: CGFloat, centre: CGPoint)? {
+    /// entirely inside `size`, leaving real margin on every side. `nil` for a
+    /// degenerate size.
+    ///
+    /// `horizontalInsetFraction` / `topInsetFraction` reserve margin (as a
+    /// fraction of `size`'s own width/height) on whichever side the radius
+    /// solve is actually constrained by, so neither the arc's two ends nor
+    /// its apex ever land exactly on the box's edge — see this file's header
+    /// ("position/cropping fix").
+    static func arcGeometry(
+        for size: CGSize,
+        sweepDegrees: Double,
+        horizontalInsetFraction: CGFloat = 0.07,
+        topInsetFraction: CGFloat = 0.10
+    ) -> (radius: CGFloat, centre: CGPoint)? {
         guard size.width > 0, size.height > 0, sweepDegrees > 0, sweepDegrees < 360 else { return nil }
         let halfSweep: CGFloat = CGFloat(sweepDegrees / 2) * .pi / 180
         let sinHalf = sin(halfSweep)
         let cosHalf = cos(halfSweep)
         guard sinHalf > 0.0001 else { return nil }
 
-        let radiusFromWidth: CGFloat = size.width / (2 * sinHalf)
+        let horizontalInset = size.width * horizontalInsetFraction
+        let topInset = size.height * topInsetFraction
+        let usableWidth = max(0, size.width - horizontalInset * 2)
+        let usableHeight = max(0, size.height - topInset)
+        guard usableWidth > 0, usableHeight > 0 else { return nil }
+
+        let radiusFromWidth: CGFloat = usableWidth / (2 * sinHalf)
         let radiusFromHeight: CGFloat = (1 - cosHalf) > 0.0001
-            ? size.height / (1 - cosHalf)
+            ? usableHeight / (1 - cosHalf)
             : .greatestFiniteMagnitude
         let radius: CGFloat = min(radiusFromWidth, radiusFromHeight)
         let centre = CGPoint(x: size.width / 2, y: size.height + radius * cosHalf)
@@ -132,7 +165,10 @@ struct SpeedometerCompactDial: View {
     }
 }
 
-/// The live compact widget — ticks the shared view model each frame.
+/// The live compact widget — ticks the shared view model each frame. Draws no
+/// background of its own — see `SpeedometerGaugeView`'s doc comment; the
+/// dashboard widget wrapper (`SpeedometerComponentView`) supplies the
+/// translucent widget surface.
 struct SpeedometerCompactView: View {
 
     let viewModel: SpeedometerViewModel
@@ -141,14 +177,10 @@ struct SpeedometerCompactView: View {
     @EnvironmentObject private var speedUnitStore: SpeedUnitStore
 
     var body: some View {
-        ZStack {
-            SpeedometerPalette.background
-
-            TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
-                SpeedometerCompactDial(presentation: viewModel.tick(at: context.date))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-            }
+        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
+            SpeedometerCompactDial(presentation: viewModel.tick(at: context.date))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
         }
         .onAppear {
             viewModel.connect(to: locationStore)
