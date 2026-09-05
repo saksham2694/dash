@@ -44,6 +44,12 @@ struct DashApp: App {
     /// changes it. See `Core/SpeedUnitStore`.
     @StateObject private var speedUnit = SpeedUnitStore()
 
+    /// Persisted Google Maps visual-appearance preference (M9.1). Read by the
+    /// Map feature's live views (`DashMapView` / `MapDashboardMapView`); the
+    /// Settings ▸ Maps ▸ Map Appearance screen changes it. See
+    /// `Core/MapAppearanceStore`.
+    @StateObject private var mapAppearance = MapAppearanceStore()
+
     init() {
         // Hand the Google Maps + Places SDKs their API key before any map view
         // or place lookup happens.
@@ -82,6 +88,7 @@ struct DashApp: App {
                 .environmentObject(homeLayout)
                 .environmentObject(wallpaper)
                 .environmentObject(speedUnit)
+                .environmentObject(mapAppearance)
                 .task { connection.startSession() }
                 // Dash is a fixed full-screen automotive surface. The software
                 // keyboard (Maps search) must overlay content, never resize or

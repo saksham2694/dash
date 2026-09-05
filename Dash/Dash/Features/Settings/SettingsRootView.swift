@@ -78,5 +78,6 @@ struct SettingsRootView: View {
         .environmentObject(FeatureRegistry.makeDefault())
         .environmentObject(WallpaperStore())
         .environmentObject(SpeedUnitStore())
+        .environmentObject(MapAppearanceStore())
 }
 #endif

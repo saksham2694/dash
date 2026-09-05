@@ -338,4 +338,5 @@ struct MapFullScreenView: View {
     let _ = GooglePlacesConfiguration.bootstrap()
     MapFullScreenView(feature: MapFeature())
         .environmentObject(LocationStore())
+        .environmentObject(MapAppearanceStore())
 }

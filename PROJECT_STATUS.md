@@ -3655,4 +3655,77 @@ geometry fixes and one surface fix, all in `Features/Speedometer/`, no
 Tests: new `SpeedometerCompactArcGeometryTests` / `SpeedometerDialCenteringTests`
 (pure geometry, both aspect ratios). Nothing committed.
 
-- Nothing committed.
+## Map — M9.1 GTA San Andreas map appearance
+
+Status: **Implemented, unit-tested, Debug build clean — physical
+verification on the iPad still pending** (no device access from this
+session; see the physical-testing checklist below). A configurable *visual*
+appearance for the existing `GoogleMapProvider` — no changes to routing,
+search, the location pipeline, `DashRelay`, or `LocationPacket`.
+
+- **New vocabulary**: `Features/MapAppearance.swift` — `MapAppearance`
+  (`.standard` / `.gtaSanAndreas`), the same cross-cutting-enum split
+  `SpeedometerUnit` already uses.
+- **New persisted store**: `Core/MapAppearanceStore.swift` — mirrors
+  `SpeedUnitStore` exactly (`UserDefaults`, namespaced `map.appearance.v1`
+  key, invalid/missing value falls back to `.standard`). Created in
+  `DashApp` alongside `wallpaper` / `speedUnit` and injected as an
+  `@EnvironmentObject`.
+- **Settings**: Settings ▸ Apps ▸ Google Maps now resolves to a new
+  `SettingsMapsView` (the same "value row → child checkmark list" pattern
+  `SettingsSpeedometerView` uses for Speed Unit), reached via a new
+  `mapFeatureID` exception in `SettingsAppDetailView` alongside the existing
+  `speedometerFeatureID` one.
+- **Base Google Maps styling**: `Features/Map/GoogleMapStyleResolver.swift` —
+  a pure, unit-tested JSON style (Google's client-side base-map styling
+  mechanism) resolving `.standard` to `nil` (SDK default, unchanged) and
+  `.gtaSanAndreas` to a flat, high-contrast style: dark olive/forest
+  landscape, flat grey urban areas, saturated blue water (`#0066ff`), tan
+  highways (`#e8c568`) and white/light-grey local/arterial roads over strong
+  dark casings, and labels/POIs/transit suppressed almost entirely (Dash's
+  own maneuver-card UI carries turn guidance, not basemap text, so this
+  doesn't cost real navigability). `GoogleMapProvider` also sets
+  `GMSMapView.isBuildingsEnabled = false` for the GTA appearance (the one
+  flat/3D toggle that isn't expressible in the JSON style).
+- **Provider wiring**: `GoogleMapProvider` grew an `appearance: MapAppearance`
+  property (default `.standard`); `MapViewModel.setAppearance(_:)` reassigns
+  `provider` to a new `GoogleMapProvider` with the chosen appearance and
+  touches nothing else (camera, mode, destination, route, navigation progress
+  all untouched — unit-tested). `DashMapView` and `MapDashboardMapView` push
+  `MapAppearanceStore.appearance` into it on appear / on change, so a live
+  Settings change updates the map immediately, on both the full-screen map
+  and the dashboard widgets, with no restart.
+- **Player marker**: the existing dot/pointer vehicle indicator now renders a
+  flat yellow-on-black skin for the GTA appearance (vs. the unchanged
+  blue/white skin for Standard) — still driven by the same heading data,
+  still the same dot-vs-pointer decision (`GoogleMapProvider.vehicleStyle`).
+- **Route styling**: the selected/alternative route polylines resolve to
+  yellow/orange for the GTA appearance vs. the existing blue/grey for
+  Standard — width, z-order, and all routing/navigation logic unchanged.
+- **Known limitations / not built (documented, not silently skipped)**:
+  custom POI icon system (weapon shop/food/garage/etc. glyphs), a custom
+  compass overlay, and a circular "radar" map frame/HUD chrome were left for
+  a later pass — Phase 5 in the plan this milestone followed, explicitly
+  lower priority than a polished, recognizable base style. The destination
+  pin keeps its default Google Maps look in both appearances. The built-in
+  GMS compass button cannot be restyled through this mechanism.
+
+Tests: new `MapAppearanceTests.swift` — `MapAppearance` vocabulary,
+`MapAppearanceStore` persistence (default/persists/corrupt-value-fallback/
+reset, mirroring `SpeedUnitStoreTests`), `GoogleMapStyleResolver` JSON
+validity, and `MapViewModel.setAppearance` (resolves correctly, no-ops when
+redundant, leaves camera/content/mode/followsVehicle/route untouched) — plus
+one added case in `SettingsFeatureTests` pinning `mapFeatureID` to
+`MapFeature.id`. Targeted suites green throughout; full `DashTests` run at
+the end: **734 tests, 0 failures**. Debug build for `iPad (A16)` simulator
+clean.
+
+Physical-testing checklist (not yet run — needs the real iPad): Settings
+path exists; Default looks unchanged from before this milestone; switching
+to GTA San Andreas visibly restyles roads/water/land immediately; switching
+back restores Default; the choice survives a kill/relaunch; search,
+destination preview, routing, navigation, follow camera, and pan/zoom all
+still work under both appearances; both dashboard widget sizes and the
+full-screen map look correct.
+
+Nothing committed for M9.1 — the user commits through GitHub Desktop.

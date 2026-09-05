@@ -74,6 +74,13 @@ final class MapViewModel: ObservableObject {
     /// nothing else in the dashboard changes.
     @Published var provider: any MapProvider
 
+    /// The active `GoogleMapProvider`'s visual style — Settings ▸ Maps ▸ Map
+    /// Appearance (M9.1). Mirrored here (rather than read back off `provider`)
+    /// so `setAppearance` can no-op on a redundant call without downcasting.
+    /// Changing it only reassigns `provider`; camera, mode, route, and every
+    /// other piece of map/navigation state are untouched.
+    private(set) var mapAppearance: MapAppearance = .standard
+
     /// Everything the provider should render right now. Rebuilt from the retained
     /// camera + latest vehicle position + mode + destination.
     @Published private(set) var content: MapContent
@@ -129,6 +136,17 @@ final class MapViewModel: ObservableObject {
             camera: .follow(.default),
             vehicle: VehicleIndicator(coordinate: MapCameraState.default.center)
         )
+    }
+
+    /// Apply a map visual appearance (Settings ▸ Maps ▸ Map Appearance). A
+    /// no-op if it matches what's already active. Only `provider` is
+    /// reassigned — camera, mode, destination, route, and navigation progress
+    /// are left exactly as they are, so switching appearance mid-drive never
+    /// disturbs an active session.
+    func setAppearance(_ appearance: MapAppearance) {
+        guard appearance != mapAppearance else { return }
+        mapAppearance = appearance
+        provider = GoogleMapProvider(appearance: appearance)
     }
 
     /// Feed in the latest known location. The caller owns `LocationStore`; this

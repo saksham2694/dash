@@ -24,14 +24,24 @@ struct DashMapView: View {
     /// fix arrives.
     var location: LocationPacket?
 
+    @EnvironmentObject private var mapAppearanceStore: MapAppearanceStore
+
     var body: some View {
         viewModel.provider
             .makeMapView(content: viewModel.content) { event in
                 viewModel.handle(event)
             }
-            .onAppear { viewModel.update(with: location) }
+            .onAppear {
+                viewModel.update(with: location)
+                viewModel.setAppearance(mapAppearanceStore.appearance)
+            }
             .onChange(of: location) { _, newLocation in
                 viewModel.update(with: newLocation)
+            }
+            // A live change from the Settings ▸ Maps screen takes effect
+            // immediately while this view is on screen, not just on next launch.
+            .onChange(of: mapAppearanceStore.appearance) { _, newAppearance in
+                viewModel.setAppearance(newAppearance)
             }
             // M4.2 — shown only when the user has panned away and follow is off.
             .overlay(alignment: .bottomTrailing) {

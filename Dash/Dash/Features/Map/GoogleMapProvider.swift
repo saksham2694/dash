@@ -19,11 +19,18 @@ struct GoogleMapProvider: MapProvider {
 
     let id: MapProviderID = .googleMaps
 
+    /// The visual style to render — resolved by `GoogleMapStyleResolver` into
+    /// base-map JSON, plus a handful of appearance-specific overlay choices
+    /// (player-marker skin, route colours) applied below. Defaults to
+    /// `.standard` so every existing call site (tests, previews, the
+    /// convenience `MapViewModel.init()`) keeps today's look unchanged.
+    var appearance: MapAppearance = .standard
+
     func makeMapView(
         content: MapContent,
         onEvent: @escaping (MapEvent) -> Void
     ) -> AnyView {
-        AnyView(GoogleMapContainer(content: content, onEvent: onEvent))
+        AnyView(GoogleMapContainer(content: content, appearance: appearance, onEvent: onEvent))
     }
 
     /// How to draw the current-location indicator (M4.1). Pure and SDK-free so it
@@ -69,6 +76,7 @@ struct GoogleMapProvider: MapProvider {
 private struct GoogleMapContainer: UIViewRepresentable {
 
     let content: MapContent
+    let appearance: MapAppearance
     let onEvent: (MapEvent) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onEvent: onEvent) }
@@ -93,12 +101,15 @@ private struct GoogleMapContainer: UIViewRepresentable {
         marker.map = mapView
         context.coordinator.vehicleMarker = marker
 
+        context.coordinator.appearance = appearance
+        Coordinator.applyBaseStyle(appearance, to: mapView)
         context.coordinator.apply(content, to: mapView, animated: false)
         return mapView
     }
 
     func updateUIView(_ mapView: GMSMapView, context: Context) {
         context.coordinator.onEvent = onEvent
+        context.coordinator.applyAppearanceIfNeeded(appearance, to: mapView)
         context.coordinator.apply(content, to: mapView, animated: true)
     }
 
@@ -110,6 +121,11 @@ private struct GoogleMapContainer: UIViewRepresentable {
         var onEvent: (MapEvent) -> Void
         var vehicleMarker: GMSMarker?
 
+        /// The appearance last applied to this map view (base style + building
+        /// extrusion + player-marker skin + route colours). Set directly in
+        /// `makeUIView`; changed only via `applyAppearanceIfNeeded`.
+        var appearance: MapAppearance = .standard
+
         private var routeLines: [String: GMSPolyline] = [:]
         private var pins: [String: GMSMarker] = [:]
         private var applied: MapContent?
@@ -118,6 +134,35 @@ private struct GoogleMapContainer: UIViewRepresentable {
 
         init(onEvent: @escaping (MapEvent) -> Void) {
             self.onEvent = onEvent
+        }
+
+        // MARK: - Appearance (base map style + building extrusion)
+
+        /// Google Maps JSON base styling (`GoogleMapStyleResolver`) plus the one
+        /// SDK property it can't express through JSON: 3D building extrusion —
+        /// off for the flat GTA look, on (the SDK default) for `.standard`.
+        static func applyBaseStyle(_ appearance: MapAppearance, to mapView: GMSMapView) {
+            if let json = GoogleMapStyleResolver.styleJSON(for: appearance) {
+                mapView.mapStyle = try? GMSMapStyle(jsonString: json)
+            } else {
+                mapView.mapStyle = nil
+            }
+            mapView.isBuildingsEnabled = (appearance == .standard)
+        }
+
+        /// Re-applies the base style and re-skins the vehicle marker + route
+        /// lines only when the appearance actually changed — a no-op on every
+        /// render that doesn't touch Settings ▸ Maps ▸ Map Appearance.
+        func applyAppearanceIfNeeded(_ newAppearance: MapAppearance, to mapView: GMSMapView) {
+            guard newAppearance != appearance else { return }
+            appearance = newAppearance
+            Self.applyBaseStyle(newAppearance, to: mapView)
+            if let vehicle = applied?.vehicle {
+                syncVehicle(vehicle, on: mapView)
+            }
+            if let lines = applied?.polylines {
+                syncPolylines(lines, on: mapView)
+            }
         }
 
         /// Diff `content` against the last render and apply only what changed.
@@ -209,7 +254,7 @@ private struct GoogleMapContainer: UIViewRepresentable {
                 }
                 polyline.path = path
                 polyline.userData = line.id
-                Self.style(polyline, as: line.role)
+                Self.style(polyline, as: line.role, appearance: appearance)
             }
             for id in stale {
                 routeLines[id]?.map = nil
@@ -218,15 +263,26 @@ private struct GoogleMapContainer: UIViewRepresentable {
         }
 
         /// Visual differentiation for the route polylines (M4.5) — the only
-        /// place stroke / width / z-order is decided.
-        private static func style(_ polyline: GMSPolyline, as role: MapPolylineRole) {
-            switch role {
-            case .selected:
+        /// place stroke / width / z-order is decided. Colours vary with
+        /// `appearance` (spec §13: the route should visually fit the GTA map)
+        /// but width / z-order — and every other route/navigation behaviour —
+        /// stay identical across appearances.
+        private static func style(_ polyline: GMSPolyline, as role: MapPolylineRole, appearance: MapAppearance) {
+            switch (appearance, role) {
+            case (.standard, .selected):
                 polyline.strokeColor = .systemBlue
                 polyline.strokeWidth = 6
                 polyline.zIndex = 2
-            case .alternative:
+            case (.standard, .alternative):
                 polyline.strokeColor = UIColor.systemGray.withAlphaComponent(0.85)
+                polyline.strokeWidth = 4
+                polyline.zIndex = 1
+            case (.gtaSanAndreas, .selected):
+                polyline.strokeColor = UIColor.systemYellow
+                polyline.strokeWidth = 6
+                polyline.zIndex = 2
+            case (.gtaSanAndreas, .alternative):
+                polyline.strokeColor = UIColor.systemOrange.withAlphaComponent(0.85)
                 polyline.strokeWidth = 4
                 polyline.zIndex = 1
             }
@@ -262,35 +318,68 @@ private struct GoogleMapContainer: UIViewRepresentable {
             marker.position = Self.coordinate(vehicle.coordinate)
             switch GoogleMapProvider.vehicleStyle(for: vehicle) {
             case .locationDot:
-                marker.icon = Self.locationDotImage
+                marker.icon = Self.locationDotImage(for: appearance)
                 marker.rotation = 0
             case .directionalPointer(let rotationDegrees):
-                marker.icon = Self.directionalPointerImage
+                marker.icon = Self.directionalPointerImage(for: appearance)
                 marker.rotation = rotationDegrees
             }
         }
 
-        // MARK: - Vehicle-indicator icons (drawn once, then cached)
+        // MARK: - Vehicle-indicator icons (drawn once per appearance, then cached)
+        //
+        // `.standard` renders identically to before appearances existed.
+        // `.gtaSanAndreas` swaps the blue/white "you are here" skin for a flat
+        // yellow-on-black one — closer to the classic radar player blip — with
+        // no shadow/blur, matching the flat GTA visual direction (§4/§8). Either
+        // way this is styling only: `GoogleMapProvider.vehicleStyle(for:)` still
+        // makes the dot-vs-pointer call from the same heading data.
 
-        /// A blue "you are here" dot with a white ring — shown when no usable
-        /// heading is available. Distinct from the red destination pin.
-        private static let locationDotImage: UIImage = {
+        private static var locationDotImageCache: [MapAppearance: UIImage] = [:]
+
+        private static func locationDotImage(for appearance: MapAppearance) -> UIImage {
+            if let cached = locationDotImageCache[appearance] { return cached }
+            let image = renderLocationDotImage(appearance: appearance)
+            locationDotImageCache[appearance] = image
+            return image
+        }
+
+        /// A "you are here" dot — shown when no usable heading is available.
+        /// Distinct from the red destination pin.
+        private static func renderLocationDotImage(appearance: MapAppearance) -> UIImage {
             let side: CGFloat = 24
             let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
             return renderer.image { context in
                 let cg = context.cgContext
                 let ring = CGRect(x: 1, y: 1, width: side - 2, height: side - 2)
-                cg.setShadow(offset: CGSize(width: 0, height: 1), blur: 2, color: UIColor.black.withAlphaComponent(0.3).cgColor)
-                UIColor.white.setFill()
-                cg.fillEllipse(in: ring)
-                UIColor.systemBlue.setFill()
-                cg.fillEllipse(in: ring.insetBy(dx: 3, dy: 3))
+                switch appearance {
+                case .standard:
+                    cg.setShadow(offset: CGSize(width: 0, height: 1), blur: 2, color: UIColor.black.withAlphaComponent(0.3).cgColor)
+                    UIColor.white.setFill()
+                    cg.fillEllipse(in: ring)
+                    UIColor.systemBlue.setFill()
+                    cg.fillEllipse(in: ring.insetBy(dx: 3, dy: 3))
+                case .gtaSanAndreas:
+                    UIColor.black.setFill()
+                    cg.fillEllipse(in: ring)
+                    UIColor.systemYellow.setFill()
+                    cg.fillEllipse(in: ring.insetBy(dx: 3, dy: 3))
+                }
             }
-        }()
+        }
 
-        /// A blue arrowhead pointing "up" at rotation 0 (i.e. toward heading 0 /
+        private static var directionalPointerImageCache: [MapAppearance: UIImage] = [:]
+
+        private static func directionalPointerImage(for appearance: MapAppearance) -> UIImage {
+            if let cached = directionalPointerImageCache[appearance] { return cached }
+            let image = renderDirectionalPointerImage(appearance: appearance)
+            directionalPointerImageCache[appearance] = image
+            return image
+        }
+
+        /// An arrowhead pointing "up" at rotation 0 (i.e. toward heading 0 /
         /// true north). `syncVehicle` sets `marker.rotation` to the bearing.
-        private static let directionalPointerImage: UIImage = {
+        private static func renderDirectionalPointerImage(appearance: MapAppearance) -> UIImage {
             let side: CGFloat = 32
             let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
             return renderer.image { context in
@@ -301,13 +390,23 @@ private struct GoogleMapContainer: UIViewRepresentable {
                 path.addLine(to: CGPoint(x: 5, y: side - 4))            // bottom-left
                 path.close()
                 path.lineJoinStyle = .round
-                path.lineWidth = 3
-                UIColor.systemBlue.setFill()
-                path.fill()
-                UIColor.white.setStroke()
-                path.stroke()
+
+                switch appearance {
+                case .standard:
+                    path.lineWidth = 3
+                    UIColor.systemBlue.setFill()
+                    path.fill()
+                    UIColor.white.setStroke()
+                    path.stroke()
+                case .gtaSanAndreas:
+                    path.lineWidth = 3.5
+                    UIColor.systemYellow.setFill()
+                    path.fill()
+                    UIColor.black.setStroke()
+                    path.stroke()
+                }
             }
-        }()
+        }
 
         // MARK: - GMSMapViewDelegate
 

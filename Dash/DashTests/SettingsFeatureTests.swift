@@ -74,6 +74,13 @@ struct SettingsFeatureTests {
         // id is ever renamed.
         #expect(speedometerFeatureID == SpeedometerFeature.id)
     }
+
+    @Test("SettingsAppDetailView's literal Google Maps id stays in sync with MapFeature.id")
+    func mapsIDMatchesLiteral() {
+        // Same guard as `speedometerIDMatchesLiteral`, for the Map Appearance
+        // setting (M9.1).
+        #expect(mapFeatureID == MapFeature.id)
+    }
 }
 
 // MARK: - SettingsRootView.apps(from:) — the registry-driven Apps section

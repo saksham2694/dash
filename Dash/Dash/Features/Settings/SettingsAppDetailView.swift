@@ -3,12 +3,12 @@
 //  Dash — Settings feature
 //
 //  The generic per-app settings page (M8.3 §3). Every registered app renders
-//  through the SAME placeholder body except Speedometer, which gets its one
-//  real setting (Speed Unit) — a single, explicitly-called-out exception, not
-//  a per-app switch: Google Maps, Apple Maps, Apple Music and Weather all take
-//  the placeholder branch with no feature-specific code of their own. A
-//  future feature with real settings gets the same treatment Speedometer did
-//  here, without any other app's page changing.
+//  through the SAME placeholder body except Speedometer (Speed Unit) and
+//  Google Maps (Map Appearance, M9.1) — explicitly-called-out exceptions, not
+//  a per-app switch: Apple Maps, Apple Music and Weather all take the
+//  placeholder branch with no feature-specific code of their own. A future
+//  feature with real settings gets the same treatment, without any other
+//  app's page changing.
 //
 //  The navigation title is always `manifest.title` — never hardcoded per app.
 //
@@ -25,6 +25,10 @@ import SwiftUI
 /// not `private`, so a test can assert the two stay in sync.
 let speedometerFeatureID: FeatureID = "speedometer"
 
+/// Google Maps' stable id (matches `MapFeature.id`, kept as a literal here for
+/// the same reason as `speedometerFeatureID` above).
+let mapFeatureID: FeatureID = "maps"
+
 struct SettingsAppDetailView: View {
 
     let manifest: FeatureManifest
@@ -33,6 +37,8 @@ struct SettingsAppDetailView: View {
         Group {
             if manifest.id == speedometerFeatureID {
                 SettingsSpeedometerView()
+            } else if manifest.id == mapFeatureID {
+                SettingsMapsView()
             } else {
                 placeholder
             }
@@ -69,5 +75,16 @@ struct SettingsAppDetailView: View {
         ))
     }
     .environmentObject(SpeedUnitStore())
+}
+
+#Preview("Google Maps (real setting)") {
+    NavigationStack {
+        SettingsAppDetailView(manifest: FeatureManifest(
+            id: "maps", title: "Google Maps", symbolName: "map.fill",
+            supportedSizes: [.compact, .medium, .large, .full], defaultSize: .large,
+            iconStyle: .pinned(.green)
+        ))
+    }
+    .environmentObject(MapAppearanceStore())
 }
 #endif

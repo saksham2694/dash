@@ -26,6 +26,7 @@ struct MapDashboardMapView: View {
     let feature: MapFeature
 
     @EnvironmentObject private var locationStore: LocationStore
+    @EnvironmentObject private var mapAppearanceStore: MapAppearanceStore
 
     private var style: MapDashboardCamera.Style {
         navigationViewModel.isActive ? .navigating : .cruising
@@ -58,6 +59,12 @@ struct MapDashboardMapView: View {
                 }
             }
             .mapDashboardObserving(feature)
+            .onAppear { mapViewModel.setAppearance(mapAppearanceStore.appearance) }
+            // A live change from the Settings ▸ Maps screen takes effect
+            // immediately while a Map widget is on screen, not just on next launch.
+            .onChange(of: mapAppearanceStore.appearance) { _, newAppearance in
+                mapViewModel.setAppearance(newAppearance)
+            }
     }
 }
 
